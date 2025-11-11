@@ -16,6 +16,19 @@ on:
         required: false
         type: boolean
         default: false
+      image_option:
+        description: 'Image option for E2E tests'
+        required: false
+        type: choice
+        options:
+          - use_existing
+          - build_new
+        default: use_existing
+      image_tag:
+        description: 'Image tag to use (only if "use_existing" is selected)'
+        required: false
+        type: string
+        default: 'ghcr.io/ev-shindin/workload-variant-autoscaler:latest'
 
 jobs:
   lint-and-test:
@@ -91,6 +104,20 @@ jobs:
           sudo mv kubectl /usr/local/bin/kubectl
           kubectl version --client
 
+      - name: Build Docker image
+        if: ${{ github.event.inputs.skip_e2e != 'true' && github.event.inputs.image_option == 'build_new' }}
+        run: |
+          echo "Building Docker image..."
+          make docker-build IMG=localhost:5000/workload-variant-autoscaler:ci-test
+
+      - name: Set up local registry for Kind
+        if: ${{ github.event.inputs.skip_e2e != 'true' && github.event.inputs.image_option == 'build_new' }}
+        run: |
+          echo "Setting up local Docker registry for Kind..."
+          docker run -d -p 5000:5000 --name registry registry:2
+          docker tag localhost:5000/workload-variant-autoscaler:ci-test localhost:5000/workload-variant-autoscaler:ci-test
+          docker push localhost:5000/workload-variant-autoscaler:ci-test
+
       - name: Verify CRD YAML Schema (Pre-E2E)
         if: ${{ github.event.inputs.skip_e2e != 'true' }}
         run: |
@@ -164,14 +191,24 @@ jobs:
             echo "✅ **All required fields present in CRD YAML**" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Run make test-e2e
-        if: ${{ github.event.inputs.skip_e2e != 'true' }}
+      - name: Run make test-e2e (with existing image)
+        if: ${{ github.event.inputs.skip_e2e != 'true' && github.event.inputs.image_option == 'use_existing' }}
         timeout-minutes: 60
         env:
-          E2E_IMG: ghcr.io/ev-shindin/workload-variant-autoscaler:latest
+          E2E_IMG: ${{ github.event.inputs.image_tag }}
           SKIP_DOCKER_BUILD: "true"
         run: |
-          echo "Running E2E tests..."
+          echo "Running E2E tests with existing image: ${{ github.event.inputs.image_tag }}..."
+          make test-e2e
+
+      - name: Run make test-e2e (with newly built image)
+        if: ${{ github.event.inputs.skip_e2e != 'true' && github.event.inputs.image_option == 'build_new' }}
+        timeout-minutes: 60
+        env:
+          E2E_IMG: localhost:5000/workload-variant-autoscaler:ci-test
+          SKIP_DOCKER_BUILD: "true"
+        run: |
+          echo "Running E2E tests with newly built image..."
           make test-e2e
 
       - name: Verify CRD Schema (Diagnostic)
@@ -285,4 +322,9 @@ jobs:
             echo "- **E2E Tests**: ⏭️ Skipped" >> $GITHUB_STEP_SUMMARY
           else
             echo "- **E2E Tests**: ✅" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ github.event.inputs.image_option }}" = "build_new" ]; then
+              echo "- **Image**: 🔨 Built new (localhost:5000/workload-variant-autoscaler:ci-test)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- **Image**: 📦 Used existing (${{ github.event.inputs.image_tag }})" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
