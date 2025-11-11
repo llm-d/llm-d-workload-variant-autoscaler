@@ -193,7 +193,9 @@ jobs:
 
       - name: Run make test-e2e (with existing image)
         if: ${{ github.event.inputs.skip_e2e != 'true' && github.event.inputs.image_option == 'use_existing' }}
+        id: e2e_tests
         timeout-minutes: 60
+        continue-on-error: true
         env:
           E2E_IMG: ${{ github.event.inputs.image_tag }}
           SKIP_DOCKER_BUILD: "true"
@@ -203,13 +205,49 @@ jobs:
 
       - name: Run make test-e2e (with newly built image)
         if: ${{ github.event.inputs.skip_e2e != 'true' && github.event.inputs.image_option == 'build_new' }}
+        id: e2e_tests_new
         timeout-minutes: 60
+        continue-on-error: true
         env:
           E2E_IMG: localhost:5000/workload-variant-autoscaler:ci-test
           SKIP_DOCKER_BUILD: "true"
         run: |
           echo "Running E2E tests with newly built image..."
           make test-e2e
+
+      - name: Run E2E Diagnostics on Failure
+        if: ${{ github.event.inputs.skip_e2e != 'true' && (steps.e2e_tests.outcome == 'failure' || steps.e2e_tests_new.outcome == 'failure') }}
+        continue-on-error: true
+        run: |
+          echo "::group::🔍 E2E Test Diagnostics"
+          chmod +x test/utils/ci_diagnostics.sh
+          ./test/utils/ci_diagnostics.sh || true
+          echo "::endgroup::"
+
+      - name: Collect Controller Logs on Failure
+        if: ${{ github.event.inputs.skip_e2e != 'true' && (steps.e2e_tests.outcome == 'failure' || steps.e2e_tests_new.outcome == 'failure') }}
+        continue-on-error: true
+        run: |
+          echo "::group::📋 Controller Logs"
+          kubectl logs -n workload-variant-autoscaler-system \
+            -l app.kubernetes.io/name=workload-variant-autoscaler \
+            --tail=200 \
+            --timestamps || echo "Could not fetch controller logs"
+          echo "::endgroup::"
+
+      - name: Collect VariantAutoscaling Resources on Failure
+        if: ${{ github.event.inputs.skip_e2e != 'true' && (steps.e2e_tests.outcome == 'failure' || steps.e2e_tests_new.outcome == 'failure') }}
+        continue-on-error: true
+        run: |
+          echo "::group::📄 VariantAutoscaling Resources"
+          kubectl get variantautoscaling -A -o yaml || echo "Could not fetch VAs"
+          echo "::endgroup::"
+
+      - name: Fail Job if E2E Tests Failed
+        if: ${{ github.event.inputs.skip_e2e != 'true' && (steps.e2e_tests.outcome == 'failure' || steps.e2e_tests_new.outcome == 'failure') }}
+        run: |
+          echo "::error::E2E tests failed - check diagnostic output above"
+          exit 1
 
       - name: Verify CRD Schema (Diagnostic)
         if: ${{ github.event.inputs.skip_e2e != 'true' && always() }}
