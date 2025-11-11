@@ -787,6 +787,38 @@ var _ = Describe("Test workload-variant-autoscaler with vllme deployment - multi
 		err = crClient.Create(ctx, secondInferenceModel)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to create second InferenceModel: %s", secondModelName))
 
+		By("waiting for Prometheus to discover and scrape new ServiceMonitors")
+		_, _ = fmt.Fprintf(GinkgoWriter, "ServiceMonitors created. Waiting 90s for Prometheus to discover and scrape endpoints...\n")
+		time.Sleep(90 * time.Second)
+
+		By("verifying metrics are available in Prometheus before starting tests")
+		// Set up port-forward to Prometheus for verification
+		promPortForwardCmd := utils.SetUpPortForward(k8sClient, ctx, "kube-prometheus-stack-prometheus", controllerMonitoringNamespace, 9090, 9090)
+		defer func() {
+			_ = utils.StopCmd(promPortForwardCmd)
+		}()
+
+		_, _ = fmt.Fprintf(GinkgoWriter, "Waiting for Prometheus port-forward to be ready...\n")
+		err = utils.VerifyPortForwardReadiness(ctx, 9090, fmt.Sprintf("https://localhost:%d/api/v1/query?query=up", 9090))
+		Expect(err).NotTo(HaveOccurred(), "Prometheus port-forward should be ready")
+
+		// Verify that vLLM metrics are being scraped by Prometheus
+		prometheusClient, err := utils.NewPrometheusClient("https://localhost:9090", true)
+		Expect(err).NotTo(HaveOccurred(), "Should be able to create Prometheus client")
+
+		_, _ = fmt.Fprintf(GinkgoWriter, "Checking if Prometheus has scraped vLLM metrics from llm-d-sim pods...\n")
+		Eventually(func(g Gomega) {
+			// Query for vLLM metrics with the model name
+			query := fmt.Sprintf(`vllm:request_success_total{model_name="%s"}`, firstModelName)
+			_, queryErr := prometheusClient.QueryWithRetry(ctx, query)
+			g.Expect(queryErr).NotTo(HaveOccurred(), "Prometheus should have vLLM metrics available")
+			_, _ = fmt.Fprintf(GinkgoWriter, "✓ Prometheus has vLLM metrics for model: %s\n", firstModelName)
+		}, 2*time.Minute, 10*time.Second).Should(Succeed(), "Prometheus should scrape vLLM metrics within 2 minutes")
+
+		// Stop the port-forward before continuing with tests
+		err = utils.StopCmd(promPortForwardCmd)
+		Expect(err).NotTo(HaveOccurred(), "Should be able to stop Prometheus port-forward")
+
 		logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 	})
 
