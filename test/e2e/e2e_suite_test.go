@@ -213,14 +213,27 @@ var _ = ReportAfterEach(func(report SpecReport) {
 		_, _ = fmt.Fprintf(GinkgoWriter, "🔍 Test Failed - Running Diagnostics\n")
 		_, _ = fmt.Fprintf(GinkgoWriter, "========================================\n\n")
 
-		// Run diagnostic script if it exists
-		if _, err := os.Stat("../../test/utils/ci_diagnostics.sh"); err == nil {
-			cmd := exec.Command("bash", "../../test/utils/ci_diagnostics.sh")
-			output, _ := cmd.CombinedOutput()
-			_, _ = fmt.Fprintf(GinkgoWriter, "%s\n", string(output))
-		} else {
+		// Run diagnostic script if it exists (try multiple possible paths)
+		scriptPaths := []string{
+			"../../test/utils/ci_diagnostics.sh",
+			"../utils/ci_diagnostics.sh",
+			"test/utils/ci_diagnostics.sh",
+		}
+
+		scriptFound := false
+		for _, scriptPath := range scriptPaths {
+			if _, err := os.Stat(scriptPath); err == nil {
+				cmd := exec.Command("bash", scriptPath)
+				output, _ := cmd.CombinedOutput()
+				_, _ = fmt.Fprintf(GinkgoWriter, "%s\n", string(output))
+				scriptFound = true
+				break
+			}
+		}
+
+		if !scriptFound {
 			// Fallback: Collect critical info directly
-			_, _ = fmt.Fprintf(GinkgoWriter, "Diagnostic script not found, collecting basic info...\n\n")
+			_, _ = fmt.Fprintf(GinkgoWriter, "Diagnostic script not found at any expected path, collecting basic info...\n\n")
 
 			// Collect controller logs
 			_, _ = fmt.Fprintf(GinkgoWriter, "=== Controller Logs (last 100 lines) ===\n")
