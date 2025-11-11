@@ -206,6 +206,49 @@ var _ = BeforeSuite(func() {
 	}
 })
 
+// ReportAfterEach runs after each test spec and captures diagnostics on failure
+var _ = ReportAfterEach(func(report SpecReport) {
+	if report.Failed() {
+		_, _ = fmt.Fprintf(GinkgoWriter, "\n\n========================================\n")
+		_, _ = fmt.Fprintf(GinkgoWriter, "🔍 Test Failed - Running Diagnostics\n")
+		_, _ = fmt.Fprintf(GinkgoWriter, "========================================\n\n")
+
+		// Run diagnostic script if it exists
+		if _, err := os.Stat("../../test/utils/ci_diagnostics.sh"); err == nil {
+			cmd := exec.Command("bash", "../../test/utils/ci_diagnostics.sh")
+			output, _ := cmd.CombinedOutput()
+			_, _ = fmt.Fprintf(GinkgoWriter, "%s\n", string(output))
+		} else {
+			// Fallback: Collect critical info directly
+			_, _ = fmt.Fprintf(GinkgoWriter, "Diagnostic script not found, collecting basic info...\n\n")
+
+			// Collect controller logs
+			_, _ = fmt.Fprintf(GinkgoWriter, "=== Controller Logs (last 100 lines) ===\n")
+			logCmd := exec.Command("kubectl", "logs", "-n", controllerNamespace,
+				"-l", "app.kubernetes.io/name=workload-variant-autoscaler",
+				"--tail=100", "--timestamps")
+			if logOutput, err := logCmd.CombinedOutput(); err == nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "%s\n", string(logOutput))
+			} else {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Could not fetch controller logs: %v\n", err)
+			}
+
+			// Collect VariantAutoscaling resources
+			_, _ = fmt.Fprintf(GinkgoWriter, "\n=== VariantAutoscaling Resources ===\n")
+			vaCmd := exec.Command("kubectl", "get", "variantautoscaling", "-A", "-o", "yaml")
+			if vaOutput, err := vaCmd.CombinedOutput(); err == nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "%s\n", string(vaOutput))
+			} else {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Could not fetch VAs: %v\n", err)
+			}
+		}
+
+		_, _ = fmt.Fprintf(GinkgoWriter, "\n========================================\n")
+		_, _ = fmt.Fprintf(GinkgoWriter, "Diagnostics Complete\n")
+		_, _ = fmt.Fprintf(GinkgoWriter, "========================================\n\n")
+	}
+})
+
 var _ = AfterSuite(func() {
 	// Teardown KEDA after the suite if not skipped and if it was not already installed
 	if !skipKEDAInstall && !isKEDAAlreadyInstalled {
