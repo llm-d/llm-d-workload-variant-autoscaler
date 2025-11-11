@@ -183,20 +183,24 @@ fi
 # 5. Check ServiceMonitors
 print_header "5. Checking ServiceMonitors"
 if kubectl get servicemonitor -n $NAMESPACE_MONITORING &>/dev/null 2>&1; then
-    SM_COUNT=$(kubectl get servicemonitor -n $NAMESPACE_MONITORING --no-headers 2>/dev/null | grep -c "llm-d" || echo "0")
+    # Count ServiceMonitors (both llm-d and vllme)
+    SM_COUNT=$(kubectl get servicemonitor -n $NAMESPACE_MONITORING --no-headers 2>/dev/null | grep -E "(llm-d|vllme)" | wc -l | tr -d ' ')
+    # Ensure SM_COUNT is a valid integer
+    SM_COUNT=${SM_COUNT:-0}
+
     if [ "$SM_COUNT" -eq 0 ]; then
-        print_warning "No llm-d ServiceMonitors found in $NAMESPACE_MONITORING"
+        print_warning "No llm-d or vllme ServiceMonitors found in $NAMESPACE_MONITORING"
         echo ""
         echo "All ServiceMonitors:"
         kubectl get servicemonitor -n $NAMESPACE_MONITORING
     else
-        print_success "Found $SM_COUNT llm-d ServiceMonitor(s)"
+        print_success "Found $SM_COUNT ServiceMonitor(s) for e2e tests"
         echo ""
-        kubectl get servicemonitor -n $NAMESPACE_MONITORING | grep "llm-d"
+        kubectl get servicemonitor -n $NAMESPACE_MONITORING | grep -E "(llm-d|vllme)"
 
         # Show details of first ServiceMonitor
         echo ""
-        SM_NAME=$(kubectl get servicemonitor -n $NAMESPACE_MONITORING -o name 2>/dev/null | grep "llm-d" | head -1 | cut -d'/' -f2)
+        SM_NAME=$(kubectl get servicemonitor -n $NAMESPACE_MONITORING -o name 2>/dev/null | grep -E "(llm-d|vllme)" | head -1 | cut -d'/' -f2)
         if [ -n "$SM_NAME" ]; then
             echo "Details of ServiceMonitor: $SM_NAME"
             kubectl get servicemonitor -n $NAMESPACE_MONITORING "$SM_NAME" -o yaml | grep -A 10 "spec:"
@@ -323,7 +327,9 @@ if [ -n "$CONTROLLER_POD" ]; then
 
     echo ""
     echo "Checking for 'Metrics unavailable' errors:"
-    METRICS_UNAVAIL=$(kubectl logs -n $NAMESPACE_CONTROLLER "$CONTROLLER_POD" --tail=100 2>/dev/null | grep -c "Metrics unavailable" || echo "0")
+    METRICS_UNAVAIL=$(kubectl logs -n $NAMESPACE_CONTROLLER "$CONTROLLER_POD" --tail=100 2>/dev/null | grep -c "Metrics unavailable" | tr -d ' ')
+    # Ensure METRICS_UNAVAIL is a valid integer
+    METRICS_UNAVAIL=${METRICS_UNAVAIL:-0}
     if [ "$METRICS_UNAVAIL" -gt 0 ]; then
         print_error "Found $METRICS_UNAVAIL 'Metrics unavailable' log entries"
         echo ""
