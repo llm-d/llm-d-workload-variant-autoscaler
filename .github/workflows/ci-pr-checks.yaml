@@ -126,10 +126,46 @@ jobs:
           fi
 
       - name: Run make test-e2e
+        id: e2e_tests
         shell: bash
         timeout-minutes: 35
+        continue-on-error: true
         run: |
           make test-e2e
+
+      - name: Run E2E Diagnostics on Failure
+        if: steps.e2e_tests.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          echo "::group::🔍 E2E Test Diagnostics"
+          chmod +x test/utils/ci_diagnostics.sh
+          ./test/utils/ci_diagnostics.sh || true
+          echo "::endgroup::"
+
+      - name: Collect Controller Logs on Failure
+        if: steps.e2e_tests.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          echo "::group::📋 Controller Logs"
+          kubectl logs -n workload-variant-autoscaler-system \
+            -l app.kubernetes.io/name=workload-variant-autoscaler \
+            --tail=200 \
+            --timestamps || echo "Could not fetch controller logs"
+          echo "::endgroup::"
+
+      - name: Collect VariantAutoscaling Resources on Failure
+        if: steps.e2e_tests.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          echo "::group::📄 VariantAutoscaling Resources"
+          kubectl get variantautoscaling -A -o yaml || echo "Could not fetch VAs"
+          echo "::endgroup::"
+
+      - name: Fail Job if E2E Tests Failed
+        if: steps.e2e_tests.outcome == 'failure'
+        run: |
+          echo "::error::E2E tests failed - check diagnostic output above"
+          exit 1
 
       - name: Verify CRD Schema (Diagnostic)
         if: always()
