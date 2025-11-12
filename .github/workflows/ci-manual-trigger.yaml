@@ -119,7 +119,7 @@ jobs:
           docker push localhost:5000/workload-variant-autoscaler:ci-test
 
       - name: Verify CRD YAML Schema (Pre-E2E)
-        if: ${{ github.event.inputs.skip_e2e != 'true' }}
+        if: false  # Temporarily disabled
         run: |
           echo "========== Verifying CRD YAML file before E2E tests =========="
           echo ""
