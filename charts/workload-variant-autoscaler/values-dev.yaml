@@ -38,9 +38,9 @@ wva:
   scaleToZero: false  # Enable scaling variants to zero replicas (default: false)
 
 llmd:
-  namespace: llm-d-inference-scheduling
+  namespace: llm-d-inference-scheduler
   modelName: ms-inference-scheduling-llm-d-modelservice
-  modelID: "unsloth/Meta-Llama-3.1-8B"
+  modelID: "Qwen/Qwen3-0.6B"
 va:
   enabled: true
   accelerator: H100

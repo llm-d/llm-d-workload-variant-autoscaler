@@ -1,0 +1,92 @@
+name: Publish Helm Chart to GHCR
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write        # needed to commit updated Chart.yaml
+  packages: write        # needed for GHCR push
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------
+      # 1. Checkout repo
+      # -----------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -----------------------------------------
+      # 2. Extract version from release tag
+      # Tag format expected: v0.0.4
+      # -----------------------------------------
+      - name: Determine version from tag
+        id: version
+        run: |
+          RAW_TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${RAW_TAG#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # -----------------------------------------
+      # 3. Update Chart.yaml with release version
+      # -----------------------------------------
+      - name: Update Chart.yaml
+        run: |
+          CHART_FILE="charts/workload-variant-autoscaler/Chart.yaml"
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Update version:
+          sed -i "s/^version:.*/version: ${VERSION}/" $CHART_FILE
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" $CHART_FILE
+
+          echo "Updated Chart.yaml:"
+          cat $CHART_FILE
+
+      # -----------------------------------------
+      # 4. Set up Helm
+      # -----------------------------------------
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+
+      # -----------------------------------------
+      # 5. Log in to GHCR
+      # -----------------------------------------
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ghcr.io \
+              --username ${{ github.actor }} \
+              --password-stdin
+
+      # -----------------------------------------
+      # 6. Package Helm chart
+      # -----------------------------------------
+      - name: Package chart
+        run: |
+          helm package charts/workload-variant-autoscaler --destination .
+
+      # -----------------------------------------
+      # 7. Push chart to GHCR
+      # -----------------------------------------
+      - name: Push to GHCR
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          CHART_FILE="workload-variant-autoscaler-${VERSION}.tgz"
+
+          helm push "$CHART_FILE" \
+            oci://ghcr.io/llm-d-incubation/workload-variant-autoscaler
+
+      # -----------------------------------------
+      # 8. Commit updated Chart.yaml (optional but recommended)
+      # -----------------------------------------
+      - name: Commit updated Chart.yaml
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add charts/workload-variant-autoscaler/Chart.yaml
+          git commit -m "Update Chart.yaml to version ${{ steps.version.outputs.version }}" || echo "No changes to commit"
+          git push

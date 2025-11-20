@@ -32,3 +32,5 @@ llm-d/
 llm-d-infra/
 llmd/
 llmd-infra/
+
+*.tgz

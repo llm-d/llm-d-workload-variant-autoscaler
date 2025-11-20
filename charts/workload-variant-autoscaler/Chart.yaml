@@ -2,5 +2,5 @@ apiVersion: v2
 name: workload-variant-autoscaler
 description: Helm chart for Workload-Variant-Autoscaler (WVA) - GPU-aware autoscaler for LLM inference workloads
 type: application
-version: 0.1.0
+version: 0.0.4
 appVersion: "1.0"
