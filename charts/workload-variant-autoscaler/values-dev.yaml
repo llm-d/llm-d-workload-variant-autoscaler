@@ -40,7 +40,7 @@ wva:
 llmd:
   namespace: llm-d-inference-scheduling
   modelName: ms-inference-scheduling-llm-d-modelservice
-  modelID: "unsloth/Meta-Llama-3.1-8B"
+  modelID: "Qwen/Qwen3-0.6B"
 va:
   enabled: true
   accelerator: H100
