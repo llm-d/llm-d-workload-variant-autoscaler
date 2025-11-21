@@ -118,15 +118,10 @@ func (a *Analyzer) AnalyzeModelCapacity(
 		config,
 	)
 
-	logger.Log.Debug("Capacity analysis completed",
-		"modelID", modelID,
-		"namespace", namespace,
-		"totalReplicas", analysis.TotalReplicas,
-		"nonSaturated", nonSaturatedCount,
-		"avgSpareKv", fmt.Sprintf("%.3f", analysis.AvgSpareKvCapacity),
-		"avgSpareQueue", fmt.Sprintf("%.1f", analysis.AvgSpareQueueLength),
-		"shouldScaleUp", analysis.ShouldScaleUp,
-		"scaleDownSafe", analysis.ScaleDownSafe)
+	logger.Log.Debugf("Capacity analysis completed: modelID=%s, namespace=%s, totalReplicas=%d, nonSaturated=%d, avgSpareKv=%.3f, avgSpareQueue=%.1f, shouldScaleUp=%v, scaleDownSafe=%v",
+		modelID, namespace, analysis.TotalReplicas, nonSaturatedCount,
+		analysis.AvgSpareKvCapacity, analysis.AvgSpareQueueLength,
+		analysis.ShouldScaleUp, analysis.ScaleDownSafe)
 
 	return analysis, nil
 }
@@ -147,6 +142,8 @@ func (a *Analyzer) analyzeVariant(
 	if len(metrics) > 0 {
 		analysis.AcceleratorName = metrics[0].AcceleratorName
 		analysis.Cost = metrics[0].Cost
+		logger.Log.Debugf("Variant analysis initialized: variant=%s, accelerator=%s, cost=%.2f, replicaCount=%d",
+			variantName, analysis.AcceleratorName, analysis.Cost, len(metrics))
 	}
 
 	var totalSpareKv float64
@@ -197,21 +194,26 @@ func (a *Analyzer) shouldScaleUp(
 	config interfaces.CapacityScalingConfig,
 ) (bool, string) {
 
-	kvTrigger := avgSpareKv < config.KvSpareTrigger
-	queueTrigger := avgSpareQueue < config.QueueSpareTrigger
+	kvTriggered := avgSpareKv < config.KvSpareTrigger
+	queueTriggered := avgSpareQueue < config.QueueSpareTrigger
 
-	if kvTrigger && queueTrigger {
+	// Early return if no triggers fired
+	if !kvTriggered && !queueTriggered {
+		return false, ""
+	}
+
+	// Build reason string based on which trigger(s) fired
+	switch {
+	case kvTriggered && queueTriggered:
 		return true, fmt.Sprintf("both KV spare (%.3f < %.3f) and queue spare (%.1f < %.1f)",
 			avgSpareKv, config.KvSpareTrigger, avgSpareQueue, config.QueueSpareTrigger)
-	} else if kvTrigger {
+	case kvTriggered:
 		return true, fmt.Sprintf("KV spare capacity low (%.3f < %.3f)",
 			avgSpareKv, config.KvSpareTrigger)
-	} else if queueTrigger {
+	default: // only queueTriggered is true
 		return true, fmt.Sprintf("queue spare capacity low (%.1f < %.1f)",
 			avgSpareQueue, config.QueueSpareTrigger)
 	}
-
-	return false, ""
 }
 
 // isScaleDownSafe simulates realistic load redistribution after removing one replica.
@@ -270,13 +272,8 @@ func (a *Analyzer) isScaleDownSafe(
 	isSafe := kvSafe && queueSafe
 
 	if !isSafe {
-		logger.Log.Debug("Scale-down unsafe: insufficient headroom after redistribution",
-			"remainingSpareKv", fmt.Sprintf("%.3f", remainingSpareKv),
-			"kvTrigger", fmt.Sprintf("%.3f", config.KvSpareTrigger),
-			"kvSafe", kvSafe,
-			"remainingSpareQueue", fmt.Sprintf("%.1f", remainingSpareQueue),
-			"queueTrigger", fmt.Sprintf("%.1f", config.QueueSpareTrigger),
-			"queueSafe", queueSafe)
+		logger.Log.Debugf("Scale-down unsafe: insufficient headroom after redistribution: remainingSpareKv=%.3f, kvTrigger=%.3f, kvSafe=%v, remainingSpareQueue=%.1f, queueTrigger=%.1f",
+			remainingSpareKv, config.KvSpareTrigger, kvSafe, remainingSpareQueue, config.QueueSpareTrigger, queueSafe)
 	}
 
 	// Capacity analyzer never initiates scale-down, only approves/denies
@@ -327,11 +324,8 @@ func (a *Analyzer) CalculateCapacityTargets(
 		if state.DesiredReplicas != 0 && state.DesiredReplicas != state.CurrentReplicas {
 			targets[va.VariantName] = state.DesiredReplicas
 			preservedVariants[va.VariantName] = true
-			logger.Log.Debug("Preserving desired replicas",
-				"variant", va.VariantName,
-				"currentReplicas", state.CurrentReplicas,
-				"readyReplicas", va.ReplicaCount,
-				"desired", state.DesiredReplicas)
+			logger.Log.Debugf("Preserving desired replicas: variant=%s, currentReplicas=%d, readyReplicas=%d, desired=%d",
+				va.VariantName, state.CurrentReplicas, va.ReplicaCount, state.DesiredReplicas)
 		}
 	}
 
@@ -355,13 +349,9 @@ func (a *Analyzer) CalculateCapacityTargets(
 		if cheapestNonPreserved != nil {
 			state := stateMap[cheapestNonPreserved.VariantName]
 			targets[cheapestNonPreserved.VariantName] = cheapestNonPreserved.ReplicaCount + 1
-			logger.Log.Info("Capacity target: scale-up cheapest variant",
-				"variant", cheapestNonPreserved.VariantName,
-				"cost", cheapestNonPreserved.Cost,
-				"currentReplicas", state.CurrentReplicas,
-				"readyReplicas", cheapestNonPreserved.ReplicaCount,
-				"target", targets[cheapestNonPreserved.VariantName],
-				"reason", capacityAnalysis.ScaleUpReason)
+			logger.Log.Infof("Capacity target: scale-up cheapest variant: variant=%s, cost=%.2f, currentReplicas=%d, readyReplicas=%d, target=%d, reason=%s",
+				cheapestNonPreserved.VariantName, cheapestNonPreserved.Cost, state.CurrentReplicas,
+				cheapestNonPreserved.ReplicaCount, targets[cheapestNonPreserved.VariantName], capacityAnalysis.ScaleUpReason)
 		}
 
 	} else if capacityAnalysis.ScaleDownSafe {
@@ -387,17 +377,14 @@ func (a *Analyzer) CalculateCapacityTargets(
 		if mostExpensiveNonPreserved != nil {
 			state := stateMap[mostExpensiveNonPreserved.VariantName]
 			targets[mostExpensiveNonPreserved.VariantName] = mostExpensiveNonPreserved.ReplicaCount - 1
-			logger.Log.Info("Capacity target: scale-down most expensive variant",
-				"variant", mostExpensiveNonPreserved.VariantName,
-				"cost", mostExpensiveNonPreserved.Cost,
-				"currentReplicas", state.CurrentReplicas,
-				"readyReplicas", mostExpensiveNonPreserved.ReplicaCount,
-				"target", targets[mostExpensiveNonPreserved.VariantName])
+			logger.Log.Infof("Capacity target: scale-down most expensive variant: variant=%s, cost=%.2f, currentReplicas=%d, readyReplicas=%d, target=%d",
+				mostExpensiveNonPreserved.VariantName, mostExpensiveNonPreserved.Cost, state.CurrentReplicas,
+				mostExpensiveNonPreserved.ReplicaCount, targets[mostExpensiveNonPreserved.VariantName])
 		}
 	} else {
-		logger.Log.Debug("Capacity targets: no change needed",
-			"shouldScaleUp", capacityAnalysis.ShouldScaleUp,
-			"scaleDownSafe", capacityAnalysis.ScaleDownSafe)
+		// No scaling action needed - capacity is adequate and stable
+		logger.Log.Debugf("Capacity targets: no scaling needed (avgSpareKv=%.3f, avgSpareQueue=%.1f, all variants stable)",
+			capacityAnalysis.AvgSpareKvCapacity, capacityAnalysis.AvgSpareQueueLength)
 	}
 
 	return targets
