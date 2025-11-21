@@ -1,4 +1,4 @@
-package controller
+package collector
 
 import (
 	"context"
@@ -243,12 +243,13 @@ func AddMetricsToOptStatus(ctx context.Context,
 	// number of replicas
 	numReplicas := int(*deployment.Spec.Replicas)
 
-	// accelerator type
+	// accelerator type - strict validation required
 	acc := ""
-	if val, ok := opt.Labels["inference.optimization/acceleratorName"]; ok {
+	if val, ok := opt.Labels["inference.optimization/acceleratorName"]; ok && val != "" {
 		acc = val
 	} else {
-		logger.Log.Warn("acceleratorName label not found on VariantAutoscaling object", "object-name", opt.Name)
+		return llmdVariantAutoscalingV1alpha1.Allocation{},
+			fmt.Errorf("missing or empty acceleratorName label on VariantAutoscaling object: %s", opt.Name)
 	}
 
 	// cost
@@ -260,18 +261,27 @@ func AddMetricsToOptStatus(ctx context.Context,
 
 	// --- 4. Populate Allocation Status ---
 
+	// Format metric values, ensuring they meet CRD validation regex '^\\d+(\\.\\d+)?$'
+	// If values are 0, FormatFloat will produce "0.00" which is valid
+	variantCostStr := strconv.FormatFloat(discoveredCost, 'f', 2, 64)
+	ttftAverageStr := strconv.FormatFloat(ttftAverageTime, 'f', 2, 64)
+	itlAverageStr := strconv.FormatFloat(itlAverage, 'f', 2, 64)
+	arrivalRateStr := strconv.FormatFloat(arrivalVal, 'f', 2, 64)
+	avgInputTokensStr := strconv.FormatFloat(avgInputTokens, 'f', 2, 64)
+	avgOutputTokensStr := strconv.FormatFloat(avgOutputTokens, 'f', 2, 64)
+
 	// populate current alloc
 	currentAlloc := llmdVariantAutoscalingV1alpha1.Allocation{
 		Accelerator: acc,
 		NumReplicas: numReplicas,
 		MaxBatch:    maxBatch,
-		VariantCost: strconv.FormatFloat(float64(discoveredCost), 'f', 2, 32),
-		TTFTAverage: strconv.FormatFloat(float64(ttftAverageTime), 'f', 2, 32),
-		ITLAverage:  strconv.FormatFloat(float64(itlAverage), 'f', 2, 32),
+		VariantCost: variantCostStr,
+		TTFTAverage: ttftAverageStr,
+		ITLAverage:  itlAverageStr,
 		Load: llmdVariantAutoscalingV1alpha1.LoadProfile{
-			ArrivalRate:     strconv.FormatFloat(float64(arrivalVal), 'f', 2, 32),
-			AvgInputTokens:  strconv.FormatFloat(float64(avgInputTokens), 'f', 2, 32),
-			AvgOutputTokens: strconv.FormatFloat(float64(avgOutputTokens), 'f', 2, 32),
+			ArrivalRate:     arrivalRateStr,
+			AvgInputTokens:  avgInputTokensStr,
+			AvgOutputTokens: avgOutputTokensStr,
 		},
 	}
 	return currentAlloc, nil
