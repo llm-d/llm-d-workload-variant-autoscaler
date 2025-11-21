@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: capacity-scaling-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: workload-variant-autoscaler
+    app.kubernetes.io/component: capacity-scaling-config
+data:
+  # Global defaults applied to all variants unless overridden
+  default: |
+    kvCacheThreshold: {{ .Values.wva.capacityScaling.default.kvCacheThreshold }}
+    queueLengthThreshold: {{ .Values.wva.capacityScaling.default.queueLengthThreshold }}
+    kvSpareTrigger: {{ .Values.wva.capacityScaling.default.kvSpareTrigger }}
+    queueSpareTrigger: {{ .Values.wva.capacityScaling.default.queueSpareTrigger }}
+{{- if .Values.wva.capacityScaling.overrides }}
+{{- range $name, $override := .Values.wva.capacityScaling.overrides }}
+  {{ $name }}: |
+    model_id: {{ $override.modelID | quote }}
+    namespace: {{ $override.namespace | quote }}
+{{- if $override.kvCacheThreshold }}
+    kvCacheThreshold: {{ $override.kvCacheThreshold }}
+{{- end }}
+{{- if $override.queueLengthThreshold }}
+    queueLengthThreshold: {{ $override.queueLengthThreshold }}
+{{- end }}
+{{- if $override.kvSpareTrigger }}
+    kvSpareTrigger: {{ $override.kvSpareTrigger }}
+{{- end }}
+{{- if $override.queueSpareTrigger }}
+    queueSpareTrigger: {{ $override.queueSpareTrigger }}
+{{- end }}
+{{- end }}
+{{- end }}

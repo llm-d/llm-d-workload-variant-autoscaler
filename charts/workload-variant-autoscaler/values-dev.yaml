@@ -37,6 +37,26 @@ wva:
   experimentalProactiveModel: false  # Enable experimental proactive scaling model (default: false)
   scaleToZero: false  # Enable scaling variants to zero replicas (default: false)
 
+  # Capacity-based scaling configuration
+  # These thresholds determine when replicas are saturated and when to scale up
+  capacityScaling:
+    # Global defaults applied to all variants unless overridden
+    default:
+      kvCacheThreshold: 0.80      # Replica saturated if KV cache utilization >= threshold (0.0-1.0)
+      queueLengthThreshold: 5     # Replica saturated if queue length >= threshold
+      kvSpareTrigger: 0.1         # Scale-up if avg spare KV capacity < trigger (0.0-1.0)
+      queueSpareTrigger: 3        # Scale-up if avg spare queue capacity < trigger
+    
+    # Per-model/namespace overrides (optional)
+    # Example:
+    # overrides:
+    #   llm-d:
+    #     modelID: "Qwen/Qwen3-0.6B"
+    #     namespace: "llm-d-inference-scheduler"
+    #     kvCacheThreshold: 0.70
+    #     kvSpareTrigger: 0.35
+    overrides: {}
+
 llmd:
   namespace: llm-d-inference-scheduler
   modelName: ms-inference-scheduling-llm-d-modelservice
