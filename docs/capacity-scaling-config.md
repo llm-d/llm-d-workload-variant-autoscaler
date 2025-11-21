@@ -43,6 +43,179 @@ kvSpareTrigger: 0.1
 queueSpareTrigger: 3
 ```
 
+## Best Practices: Coordinating with InferenceScheduler (EPP)
+
+### Threshold Alignment Recommendation
+
+**For optimal cluster performance, we strongly recommend using the same threshold values for both WVA (Workload Variant Autoscaler) and InferenceScheduler (EPP - Envoy Proxy Provider).**
+
+Using aligned thresholds ensures consistent capacity management across the cluster and prevents request drop situations:
+
+**Why threshold alignment matters:**
+
+1. **Reduced Request Drop Rates**: When WVA and EPP use the same saturation thresholds, the scheduler will avoid routing requests to replicas that WVA already considers saturated. This prevents the scheduler from overloading replicas that are about to trigger scale-up.
+
+2. **Consistent Capacity Assessment**: Both components evaluate replica capacity using the same criteria (KV cache utilization and queue length), ensuring coordinated behavior across the entire inference stack.
+
+3. **Improved GPU Utilization**: Aligned thresholds allow the cluster to maintain optimal GPU utilization without oversaturation. The scheduler respects the same capacity boundaries that drive autoscaling decisions.
+
+4. **Faster Response to Load Changes**: When both components agree on saturation thresholds, the system responds more quickly to load changes with coordinated routing and scaling actions.
+
+### Configuration Comparison
+
+#### WVA Capacity Scaling Configuration
+
+```yaml
+# WVA Configuration (capacity-scaling-config ConfigMap)
+# namespace: workload-variant-autoscaler-system
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: capacity-scaling-config
+  namespace: workload-variant-autoscaler-system
+data:
+  default: |
+    kvCacheThreshold: 0.80        # Should match EPP kvCacheUtilThreshold
+    queueLengthThreshold: 5       # Should match EPP queueDepthThreshold
+    kvSpareTrigger: 0.10          # WVA-specific (scale-up trigger)
+    queueSpareTrigger: 3          # WVA-specific (scale-up trigger)
+```
+
+#### EPP Saturation Detector Configuration
+
+The InferenceScheduler EPP component uses the [gateway-api-inference-extension](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/site-src/guides/epp-configuration/config-text.md) saturation detector to identify cluster overload:
+
+```yaml
+# EPP Saturation Detector Configuration
+saturationDetector:
+  queueDepthThreshold: 5          # Default: 5 - Backend waiting queue size threshold
+  kvCacheUtilThreshold: 0.8       # Default: 0.8 - KV cache utilization threshold (0.0-1.0)
+  metricsStalenessThreshold: 200ms # Default: 200ms - Maximum age for pod metrics
+```
+
+**Purpose**: Monitors three metrics from inference servers (backend queue size, KV cache utilization, metrics staleness) to determine saturation status. When saturation is detected, sheddable requests are dropped.
+
+**Configuration Notes**:
+- All parameters are optional; omitting them applies the documented defaults
+- EPP configuration is **read only on startup** - changes require EPP pod restart
+- Unlike WVA, EPP does not currently support live ConfigMap updates
+
+### Parameter Mapping and Alignment
+
+| Concept | WVA Field | EPP Field | Aligned Default | Description |
+|---------|-----------|-----------|-----------------|-------------|
+| **KV Cache Saturation** | `kvCacheThreshold` | `kvCacheUtilThreshold` | **0.80** (80%) | Replica is saturated when KV cache ≥ threshold |
+| **Queue Saturation** | `queueLengthThreshold` | `queueDepthThreshold` | **5** | Replica is saturated when queue length ≥ threshold |
+| **Metrics Freshness** | *(not configurable)* | `metricsStalenessThreshold` | **200ms** | EPP-only: Maximum metric age before considering stale |
+| **Scale-Up Trigger (KV)** | `kvSpareTrigger` | *(not applicable)* | **0.10** (10%) | WVA-only: Trigger scale-up when spare KV < threshold |
+| **Scale-Up Trigger (Queue)** | `queueSpareTrigger` | *(not applicable)* | **3** | WVA-only: Trigger scale-up when spare queue < threshold |
+
+### EPP Configuration Overview
+
+EPP uses YAML-based configuration with three main sections:
+
+1. **Saturation Detector** - Monitors cluster overload (relevant for WVA alignment)
+2. **Scheduling Plugins** - Request routing logic (kv-cache-scorer, queue-scorer, prefix-cache-scorer)
+3. **Scheduling Profiles** - Weighted combinations of scoring plugins
+
+For complete EPP configuration details, see [gateway-api-inference-extension/guides/epp-configuration](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/site-src/guides/epp-configuration/config-text.md)
+
+### Current Deployment Status
+
+**WVA (Workload Variant Autoscaler):**
+- ✅ ConfigMap-based configuration with live updates
+- ✅ Per-model overrides supported
+- ✅ Automatic cache reload on ConfigMap changes
+- ✅ Namespace: `workload-variant-autoscaler-system`
+- ✅ ConfigMap: `capacity-scaling-config`
+
+**EPP (InferenceScheduler):**
+- ⚠️  **Hardcoded defaults** in deployment
+- ⚠️  Configuration changes require pod restart
+- ⚠️  No per-model override support currently
+- ⚠️  Namespace: Varies by deployment (e.g., `llm-d-inference-scheduler`, `llm-d-autoscaler`)
+- ℹ️  ConfigMap `gaie-inference-scheduling-epp` contains **only** plugin configuration, **not** saturation thresholds
+
+### Configuration Workflow
+
+#### Step 1: Define Thresholds
+
+Choose thresholds based on your workload characteristics and SLO requirements:
+
+| Workload Type | kvCacheThreshold | queueLengthThreshold | Rationale |
+|---------------|------------------|----------------------|-----------|
+| **Conservative** (Default) | 0.80 | 5 | Balanced performance and utilization |
+| **Aggressive** (High GPU utilization) | 0.90 | 15 | Maximize GPU usage, higher latency variance |
+| **Strict** (Low latency SLO) | 0.70 | 3 | Prioritize responsiveness, lower utilization |
+
+#### Step 2: Apply to WVA
+
+Update `capacity-scaling-config` ConfigMap:
+
+```bash
+kubectl edit cm capacity-scaling-config -n workload-variant-autoscaler-system
+```
+
+Changes take effect **immediately** (WVA watches ConfigMap and auto-reloads).
+
+#### Step 3: Apply to EPP
+
+**Current approach** (until EPP supports ConfigMap configuration):
+
+1. Update EPP deployment environment variables or configuration file
+2. Restart EPP pods:
+   ```bash
+   kubectl rollout restart deployment/epp-controller -n llm-d-inference-scheduler
+   ```
+
+**Future approach** (when EPP adds ConfigMap support):
+
+EPP configuration will be managed via ConfigMap with `--config-text` or `--config-file` flags.
+
+#### Step 4: Verify Configuration
+
+**WVA verification:**
+```bash
+kubectl get cm capacity-scaling-config -n workload-variant-autoscaler-system -o yaml
+```
+
+**EPP verification:**
+```bash
+# Check EPP pod logs for loaded configuration
+kubectl logs -n llm-d-inference-scheduler deployment/epp-controller | grep -i "saturation\|threshold"
+```
+
+### Alignment Best Practices
+
+1. **Core Thresholds Must Match**:
+   - `kvCacheThreshold` (WVA) = `kvCacheUtilThreshold` (EPP)
+   - `queueLengthThreshold` (WVA) = `queueDepthThreshold` (EPP)
+
+2. **WVA-Specific Parameters** (`kvSpareTrigger`, `queueSpareTrigger`):
+   - These control WVA's scale-up aggressiveness
+   - Should be set **lower** than saturation thresholds
+   - Provide headroom before replicas become saturated
+   - Recommended: `kvSpareTrigger = kvCacheThreshold - 0.1 to 0.2`
+
+3. **Testing Threshold Changes**:
+   - Test in development environment first
+   - Monitor impact on request drop rate and latency
+   - Adjust based on observed behavior
+
+4. **Documentation**:
+   - Document your chosen thresholds and rationale
+   - Include in runbooks for operational teams
+
+### Future Enhancements
+
+Potential improvements for better WVA-EPP alignment:
+
+- **EPP ConfigMap Support**: Enable runtime threshold updates for EPP (matching WVA's live reload)
+- **Unified Configuration**: Single ConfigMap for both WVA and EPP saturation thresholds
+- **Per-Model Thresholds in EPP**: Support model-specific overrides (matching WVA capability)
+- **Configuration Validation**: Cross-component validation to detect misalignment
+- **Monitoring Dashboard**: Grafana dashboard showing aligned/misaligned thresholds across components
+
 ## Usage
 
 ### 1. Using Default Configuration
