@@ -99,11 +99,42 @@ The Helm chart provides different configuration files for different environments
 - **TLS Verification**: Enabled (`insecureSkipVerify: false`)
 - **Logging Level**: Production (`LOG_LEVEL: info`)
 - **Security**: Strict security settings for production use
+- **Capacity-based Scaling**: Conservative thresholds for production stability
 
 #### Development Values (`values-dev.yaml`)
 - **TLS Verification**: Relaxed (`insecureSkipVerify: true`) for easier development
 - **Logging Level**: Debug (`LOG_LEVEL: debug`) for detailed development logging
 - **Security**: Relaxed settings for development and testing
+- **Capacity Scaling**: Aggressive thresholds for faster iteration
+
+### Capacity Scaling Configuration
+
+The chart includes capacity-based scaling thresholds that determine when replicas are saturated and when to scale up:
+
+**Global Defaults** (applied to all models):
+```yaml
+wva:
+  capacityScaling:
+    default:
+      kvCacheThreshold: 0.80      # Replica saturated if KV cache ≥ 80%
+      queueLengthThreshold: 5     # Replica saturated if queue ≥ 5 requests
+      kvSpareTrigger: 0.1         # Scale-up if spare KV capacity < 10%
+      queueSpareTrigger: 3        # Scale-up if spare queue < 3
+```
+
+**Per-Model Overrides** (customize specific models):
+```yaml
+wva:
+  capacityScaling:
+    overrides:
+      llm-d:
+        modelID: "Qwen/Qwen3-0.6B"
+        namespace: "llm-d-inference-scheduler"
+        kvCacheThreshold: 0.70      # Lower threshold for production
+        kvSpareTrigger: 0.35        # Avg spare KV <10% → scale-up
+```
+
+See `docs/capacity-scaling-config.md` for detailed configuration documentation.
 
 ### Usage Examples
 
