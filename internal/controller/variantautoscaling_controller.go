@@ -86,6 +86,7 @@ type VariantAutoscalingReconciler struct {
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=nodes/status,verbs=get;list;update;patch;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;update;list;watch
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
