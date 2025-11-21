@@ -74,5 +74,10 @@ func (c *CapacityScalingConfig) Validate() error {
 		return fmt.Errorf("kvCacheThreshold (%.2f) should be >= kvSpareTrigger (%.2f)",
 			c.KvCacheThreshold, c.KvSpareTrigger)
 	}
+	// Queue threshold should be greater than spare trigger (same logic as KV cache)
+	if c.QueueLengthThreshold < c.QueueSpareTrigger {
+		return fmt.Errorf("queueLengthThreshold (%.1f) should be >= queueSpareTrigger (%.1f)",
+			c.QueueLengthThreshold, c.QueueSpareTrigger)
+	}
 	return nil
 }
