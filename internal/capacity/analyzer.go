@@ -238,11 +238,11 @@ func (a *Analyzer) isScaleDownSafe(
 
 	nonSaturatedCount := len(nonSaturatedMetrics)
 
-	// Require at least 2 non-saturated replicas for scale-down safety
-	if nonSaturatedCount < 2 {
-		logger.Log.Debug("Scale-down unsafe: insufficient non-saturated replicas",
-			"nonSaturated", nonSaturatedCount,
-			"required", 2)
+	// Require minimum non-saturated replicas for scale-down safety
+	// With fewer replicas, we cannot safely redistribute load without risking saturation
+	if nonSaturatedCount < MinNonSaturatedReplicasForScaleDown {
+		logger.Log.Debugf("Scale-down unsafe: insufficient non-saturated replicas: nonSaturated=%d, required=%d",
+			nonSaturatedCount, MinNonSaturatedReplicasForScaleDown)
 		return false, false
 	}
 
