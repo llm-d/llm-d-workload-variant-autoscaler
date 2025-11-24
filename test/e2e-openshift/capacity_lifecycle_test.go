@@ -216,6 +216,7 @@ var _ = Describe("Capacity Model: Full Lifecycle Test", Ordered, func() {
 			By(fmt.Sprintf("monitoring for %v - waiting for metrics and scaling", currentPhase.Duration))
 			monitoringStart := time.Now()
 			var finalReplicas int32
+		var peakReplicas int32 = startReplicas
 
 			// Monitor every 20 seconds
 			ticker := time.NewTicker(20 * time.Second)
@@ -258,6 +259,9 @@ var _ = Describe("Capacity Model: Full Lifecycle Test", Ordered, func() {
 					}
 
 					finalReplicas = currentReplicas
+				if currentReplicas > peakReplicas {
+						peakReplicas = currentReplicas
+					}
 				}
 			}
 
@@ -271,14 +275,14 @@ var _ = Describe("Capacity Model: Full Lifecycle Test", Ordered, func() {
 
 			finalReplicas = int32(va.Status.DesiredOptimizedAlloc.NumReplicas)
 
-			_, _ = fmt.Fprintf(GinkgoWriter, "✓ Phase %d complete: %d → %d replicas\n",
-				phaseIndex+1, startReplicas, finalReplicas)
+			_, _ = fmt.Fprintf(GinkgoWriter, "✓ Phase %d complete: %d → peak %d → final %d replicas\n",
+				phaseIndex+1, startReplicas, peakReplicas, finalReplicas)
 
 			// Verify replicas are within expected range
-			Expect(finalReplicas).To(BeNumerically(">=", currentPhase.ExpectedMin),
-				fmt.Sprintf("Replicas should be >= %d", currentPhase.ExpectedMin))
-			Expect(finalReplicas).To(BeNumerically("<=", currentPhase.ExpectedMax),
-				fmt.Sprintf("Replicas should be <= %d", currentPhase.ExpectedMax))
+			Expect(peakReplicas).To(BeNumerically(">=", currentPhase.ExpectedMin),
+				fmt.Sprintf("Peak replicas should be >= %d", currentPhase.ExpectedMin))
+			Expect(peakReplicas).To(BeNumerically("<=", currentPhase.ExpectedMax),
+				fmt.Sprintf("Peak replicas should be <= %d", currentPhase.ExpectedMax))
 
 			// Verify OptimizationReady
 			var optimizationReady bool
