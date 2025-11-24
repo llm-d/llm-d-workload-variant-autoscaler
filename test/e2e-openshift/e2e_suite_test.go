@@ -46,7 +46,7 @@ var (
 	gatewayName         = getEnvString("GATEWAY_NAME", "infra-inference-scheduling-inference-gateway")
 	modelID             = getEnvString("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
 	deployment          = getEnvString("DEPLOYMENT", "ms-inference-scheduling-llm-d-modelservice-decode")
-	requestRate         = getEnvInt("REQUEST_RATE", 20)
+	requestRate         = getEnvInt("REQUEST_RATE", 50)
 	numPrompts          = getEnvInt("NUM_PROMPTS", 3000)
 )
 
