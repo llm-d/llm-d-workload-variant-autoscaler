@@ -168,7 +168,7 @@ var _ = Describe("Capacity Model: Full Lifecycle Test", Ordered, func() {
 			var jobName string
 			var startReplicas int32
 
-			By(fmt.Sprintf("recording pre-phase state"))
+			By("recording pre-phase state")
 			va := &v1alpha1.VariantAutoscaling{}
 			err := crClient.Get(ctx, client.ObjectKey{
 				Namespace: llmDNamespace,
@@ -258,7 +258,6 @@ var _ = Describe("Capacity Model: Full Lifecycle Test", Ordered, func() {
 						_, _ = fmt.Fprintf(GinkgoWriter, "⚠ OptimizationReady is False\n")
 					}
 
-					finalReplicas = currentReplicas
 				if currentReplicas > peakReplicas {
 						peakReplicas = currentReplicas
 					}
