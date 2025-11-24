@@ -15,7 +15,7 @@ The Workload Variant Autoscaler supports capacity-based scaling using KV cache u
 
 ### ConfigMap Structure
 
-The capacity scaling configuration is stored in a ConfigMap named `capacity-scaling-config` in the `workload-variant-autoscaler-system` namespace.
+The capacity scaling configuration is stored in a ConfigMap named `capacity-scaling-config` in the Workload Variant Autoscaler controller's namespace.
 
 **Location:** `deploy/configmap-capacity-scaling.yaml`
 
@@ -43,13 +43,57 @@ kvSpareTrigger: 0.1
 queueSpareTrigger: 3
 ```
 
-## Best Practices: Coordinating with InferenceScheduler (EPP)
+### How Scale-Up Triggers Work
+
+The capacity analyzer uses a **spare capacity model** to determine when to scale up. Instead of waiting for replicas to become fully saturated, WVA proactively scales when the average spare capacity across non-saturated replicas falls below configured thresholds.
+
+**Scale-up logic:**
+
+1. **Calculate spare capacity** for each non-saturated replica:
+   - Spare KV capacity = `kvCacheThreshold - current_kv_usage`
+   - Spare queue capacity = `queueLengthThreshold - current_queue_length`
+
+2. **Average across non-saturated replicas**:
+   - WVA computes the average spare capacity across all healthy (non-saturated) replicas
+
+3. **Trigger scale-up when spare capacity is low**:
+   - If `avg_spare_kv < kvSpareTrigger` **OR** `avg_spare_queue < queueSpareTrigger`
+   - Scale-up is triggered to add capacity before existing replicas saturate
+
+**Example scenario:**
+- `kvCacheThreshold = 0.80`, `kvSpareTrigger = 0.10`
+- Replica A: 65% KV cache usage → Spare capacity: 0.15
+- Replica B: 72% KV cache usage → Spare capacity: 0.08
+- Average spare KV: (0.15 + 0.08) / 2 = **0.115**
+- Since 0.115 > 0.10, no scale-up yet
+- If Replica B increases to 75%: Average spare = 0.10 → **Scale-up triggered**
+
+This proactive approach ensures adequate headroom and prevents request drops by scaling before saturation occurs.
+
+**For detailed implementation, see:** [Capacity Analyzer Documentation](capacity-analyzer.md)
+
+## Best Practices: Coordinating with InferenceScheduler (End Point Picker)
+
+### What is End Point Picker (EPP)?
+
+The **End Point Picker (EPP)** is an intelligent request routing component in the InferenceScheduler that selects the optimal inference server replica to handle each incoming request. EPP monitors replica capacity metrics (KV cache utilization, queue depth), as well as other replica metrics and uses scoring algorithms to route requests to replicas.
+
+### Deployment Architecture
+
+**EPP Deployment Model**: Each model has a **1-to-1 relationship** with its EPP instance. Every model served by the inference infrastructure has a dedicated EPP component that routes requests specifically to that model's replicas.
+
+**Example deployment pattern:**
+- Model: `Qwen/Qwen3-0.6B` in namespace `llm-d-autoscaler` → Dedicated EPP instance `gaie-workload-autoscaler-epp`
+- Model: `ibm/granite-13b` in namespace `production` → Dedicated EPP instance `gaie-production-epp`
+- Each model deployment has its own EPP instance (naming follows namespace/workload convention)
+
+This 1-to-1 architecture means that saturation detection and request routing decisions are **model-specific**, with each EPP instance monitoring only its associated model's replicas.
 
 ### Threshold Alignment Recommendation
 
-**For optimal cluster performance, we strongly recommend using the same threshold values for both WVA (Workload Variant Autoscaler) and InferenceScheduler (EPP - Envoy Proxy Provider).**
+**For optimal cluster performance, we strongly recommend using the same threshold values for both WVA (Workload Variant Autoscaler) and InferenceScheduler (End Point Picker) for each model deployment.**
 
-Using aligned thresholds ensures consistent capacity management across the cluster and prevents request drop situations:
+Using aligned thresholds ensures consistent capacity management across the cluster and prevents request drop situations.
 
 **Why threshold alignment matters:**
 
@@ -67,12 +111,11 @@ Using aligned thresholds ensures consistent capacity management across the clust
 
 ```yaml
 # WVA Configuration (capacity-scaling-config ConfigMap)
-# namespace: workload-variant-autoscaler-system
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: capacity-scaling-config
-  namespace: workload-variant-autoscaler-system
+  namespace: <workload-variant-autoscaler-namespace>
 data:
   default: |
     kvCacheThreshold: 0.80        # Should match EPP kvCacheUtilThreshold
@@ -83,22 +126,24 @@ data:
 
 #### EPP Saturation Detector Configuration
 
-The InferenceScheduler EPP component uses the [gateway-api-inference-extension](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/site-src/guides/epp-configuration/config-text.md) saturation detector to identify cluster overload:
+The InferenceScheduler EPP component uses the [gateway-api-inference-extension](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/site-src/guides/epp-configuration/config-text.md) saturation detector to identify cluster overload.
+
+**Per-Model Configuration**: Since each model has its own dedicated EPP instance, saturation detection is configured **per model deployment**. This allows different models to have different saturation thresholds based on their specific characteristics and SLO requirements.
 
 ```yaml
-# EPP Saturation Detector Configuration
+# EPP Saturation Detector Configuration (per-model EPP instance)
 saturationDetector:
+  ...
   queueDepthThreshold: 5          # Default: 5 - Backend waiting queue size threshold
   kvCacheUtilThreshold: 0.8       # Default: 0.8 - KV cache utilization threshold (0.0-1.0)
-  metricsStalenessThreshold: 200ms # Default: 200ms - Maximum age for pod metrics
+  ...
 ```
-
-**Purpose**: Monitors three metrics from inference servers (backend queue size, KV cache utilization, metrics staleness) to determine saturation status. When saturation is detected, sheddable requests are dropped.
 
 **Configuration Notes**:
 - All parameters are optional; omitting them applies the documented defaults
 - EPP configuration is **read only on startup** - changes require EPP pod restart
 - Unlike WVA, EPP does not currently support live ConfigMap updates
+- **Each EPP instance** (one per model) can have different threshold values
 
 ### Parameter Mapping and Alignment
 
@@ -106,35 +151,8 @@ saturationDetector:
 |---------|-----------|-----------|-----------------|-------------|
 | **KV Cache Saturation** | `kvCacheThreshold` | `kvCacheUtilThreshold` | **0.80** (80%) | Replica is saturated when KV cache ≥ threshold |
 | **Queue Saturation** | `queueLengthThreshold` | `queueDepthThreshold` | **5** | Replica is saturated when queue length ≥ threshold |
-| **Metrics Freshness** | *(not configurable)* | `metricsStalenessThreshold` | **200ms** | EPP-only: Maximum metric age before considering stale |
 | **Scale-Up Trigger (KV)** | `kvSpareTrigger` | *(not applicable)* | **0.10** (10%) | WVA-only: Trigger scale-up when spare KV < threshold |
 | **Scale-Up Trigger (Queue)** | `queueSpareTrigger` | *(not applicable)* | **3** | WVA-only: Trigger scale-up when spare queue < threshold |
-
-### EPP Configuration Overview
-
-EPP uses YAML-based configuration with three main sections:
-
-1. **Saturation Detector** - Monitors cluster overload (relevant for WVA alignment)
-2. **Scheduling Plugins** - Request routing logic (kv-cache-scorer, queue-scorer, prefix-cache-scorer)
-3. **Scheduling Profiles** - Weighted combinations of scoring plugins
-
-For complete EPP configuration details, see [gateway-api-inference-extension/guides/epp-configuration](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/site-src/guides/epp-configuration/config-text.md)
-
-### Current Deployment Status
-
-**WVA (Workload Variant Autoscaler):**
-- ✅ ConfigMap-based configuration with live updates
-- ✅ Per-model overrides supported
-- ✅ Automatic cache reload on ConfigMap changes
-- ✅ Namespace: `workload-variant-autoscaler-system`
-- ✅ ConfigMap: `capacity-scaling-config`
-
-**EPP (InferenceScheduler):**
-- ⚠️  **Hardcoded defaults** in deployment
-- ⚠️  Configuration changes require pod restart
-- ⚠️  No per-model override support currently
-- ⚠️  Namespace: Varies by deployment (e.g., `llm-d-inference-scheduler`, `llm-d-autoscaler`)
-- ℹ️  ConfigMap `gaie-inference-scheduling-epp` contains **only** plugin configuration, **not** saturation thresholds
 
 ### Configuration Workflow
 
@@ -153,68 +171,80 @@ Choose thresholds based on your workload characteristics and SLO requirements:
 Update `capacity-scaling-config` ConfigMap:
 
 ```bash
-kubectl edit cm capacity-scaling-config -n workload-variant-autoscaler-system
+kubectl edit cm capacity-scaling-config -n <workload-variant-autoscaler-namespace>
 ```
 
 Changes take effect **immediately** (WVA watches ConfigMap and auto-reloads).
 
 #### Step 3: Apply to EPP
 
-**Current approach** (until EPP supports ConfigMap configuration):
+**Important**: Since each model has its own dedicated EPP instance (1-to-1 relationship), you must configure the EPP instance for **each specific model deployment** separately.
 
-1. Update EPP deployment environment variables or configuration file
-2. Restart EPP pods:
+**Current approach:**
+
+1. Identify the EPP instance for your target model:
    ```bash
-   kubectl rollout restart deployment/epp-controller -n llm-d-inference-scheduler
+   # Example: Find EPP deployment for a specific model in namespace
+   kubectl get deployments -n llm-d-autoscaler | grep epp
    ```
 
-**Future approach** (when EPP adds ConfigMap support):
+2. Update the EPP instance's environment variables or configuration file for that specific model
 
-EPP configuration will be managed via ConfigMap with `--config-text` or `--config-file` flags.
+3. Restart the EPP pod for that model:
+   ```bash
+   # Restart the specific model's EPP instance
+   kubectl rollout restart deployment/gaie-<model-name>-epp -n <namespace>
+   ```
+
+**Example for multiple models:**
+```bash
+# Model 1: granite-13b in production
+kubectl rollout restart deployment/gaie-granite-13b-epp -n production
+
+# Model 2: llama-70b in lab
+kubectl rollout restart deployment/gaie-llama-70b-epp -n lab
+```
 
 #### Step 4: Verify Configuration
 
 **WVA verification:**
 ```bash
-kubectl get cm capacity-scaling-config -n workload-variant-autoscaler-system -o yaml
+kubectl get cm capacity-scaling-config -n <workload-variant-autoscaler-namespace> -o yaml
 ```
 
-**EPP verification:**
+**EPP verification (per-model instance):**
 ```bash
-# Check EPP pod logs for loaded configuration
-kubectl logs -n llm-d-inference-scheduler deployment/epp-controller | grep -i "saturation\|threshold"
+# Check specific model's EPP pod logs for loaded configuration
+kubectl logs -n <namespace> deployment/gaie-<model-name>-epp | grep -i "saturation\|threshold"
+
+# Example: Verify EPP configuration for granite-13b model in production
+kubectl logs -n production deployment/gaie-granite-13b-epp | grep -i "saturation\|threshold"
 ```
 
 ### Alignment Best Practices
 
-1. **Core Thresholds Must Match**:
+1. **Core Thresholds Must Match Per Model**:
    - `kvCacheThreshold` (WVA) = `kvCacheUtilThreshold` (EPP)
    - `queueLengthThreshold` (WVA) = `queueDepthThreshold` (EPP)
+   - **Important**: Since each model has its own EPP instance, ensure thresholds align for **each model deployment** individually
 
-2. **WVA-Specific Parameters** (`kvSpareTrigger`, `queueSpareTrigger`):
+2. **Per-Model Configuration Strategy**:
+   - Use WVA's per-model override feature to set model-specific thresholds
+   - Configure the corresponding EPP instance with matching thresholds
+   - Document the threshold mapping for each model deployment
+   - Example: If `ibm/granite-13b` uses `kvCacheThreshold: 0.85` in WVA, its dedicated EPP must use `kvCacheUtilThreshold: 0.85`
+
+3. **WVA-Specific Parameters** (`kvSpareTrigger`, `queueSpareTrigger`):
    - These control WVA's scale-up aggressiveness
    - Should be set **lower** than saturation thresholds
    - Provide headroom before replicas become saturated
    - Recommended: `kvSpareTrigger = kvCacheThreshold - 0.1 to 0.2`
 
-3. **Testing Threshold Changes**:
+4. **Testing Threshold Changes**:
    - Test in development environment first
-   - Monitor impact on request drop rate and latency
+   - Monitor impact on request drop rate and latency for the specific model
    - Adjust based on observed behavior
-
-4. **Documentation**:
-   - Document your chosen thresholds and rationale
-   - Include in runbooks for operational teams
-
-### Future Enhancements
-
-Potential improvements for better WVA-EPP alignment:
-
-- **EPP ConfigMap Support**: Enable runtime threshold updates for EPP (matching WVA's live reload)
-- **Unified Configuration**: Single ConfigMap for both WVA and EPP saturation thresholds
-- **Per-Model Thresholds in EPP**: Support model-specific overrides (matching WVA capability)
-- **Configuration Validation**: Cross-component validation to detect misalignment
-- **Monitoring Dashboard**: Grafana dashboard showing aligned/misaligned thresholds across components
+   - Remember to update both WVA and the model's EPP instance
 
 ## Usage
 
@@ -235,7 +265,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: capacity-scaling-config
-  namespace: workload-variant-autoscaler-system
+  namespace: <workload-variant-autoscaler-namespace>
 data:
   default: |
     kvCacheThreshold: 0.75
@@ -263,7 +293,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: capacity-scaling-config
-  namespace: workload-variant-autoscaler-system
+  namespace: <workload-variant-autoscaler-namespace>
 data:
   default: |
     kvCacheThreshold: 0.80
@@ -272,14 +302,14 @@ data:
     queueSpareTrigger: 3
 
   # Override for granite model in production namespace
-  granite-production: |
+  granite-13b-production: |
     model_id: ibm/granite-13b
     namespace: production
     kvCacheThreshold: 0.85
     kvSpareTrigger: 0.15
 
   # Override for llama model in lab namespace
-  llama-lab: |
+  llama-70b-lab: |
     model_id: meta/llama-70b
     namespace: lab
     queueLengthThreshold: 20
@@ -287,7 +317,7 @@ data:
 ```
 
 **Key points:**
-- Entry keys (e.g., `granite-production`) can be any descriptive name
+- Entry keys (e.g., `granite-13b-production`) can be any descriptive name
 - Each override must include `model_id` and `namespace` fields
 - Only specified fields are overridden; others inherit from `default`
 - Multiple overrides can exist for different model/namespace combinations
@@ -405,7 +435,7 @@ INFO  Triggering reconciliation for all VariantAutoscaling resources due to Conf
 
 **Symptom:** Warning log message
 ```
-WARN Capacity scaling ConfigMap not found, using hardcoded defaults configmap=capacity-scaling-config namespace=workload-variant-autoscaler-system
+WARN Capacity scaling ConfigMap not found, using hardcoded defaults configmap=capacity-scaling-config namespace=<workload-variant-autoscaler-namespace>
 ```
 
 **Solution:** Deploy the ConfigMap:
@@ -462,12 +492,12 @@ DEBUG Applied capacity scaling override key=my-override modelID=ibm/granite-13b 
 
 1. **Verify ConfigMap was updated:**
    ```bash
-   kubectl get cm capacity-scaling-config -n workload-variant-autoscaler-system -o yaml
+   kubectl get cm capacity-scaling-config -n <workload-variant-autoscaler-namespace> -o yaml
    ```
 
 2. **Check controller logs for reload confirmation:**
    ```bash
-   kubectl logs -n workload-variant-autoscaler-system deployment/wva-controller | grep "Capacity scaling"
+   kubectl logs -n <workload-variant-autoscaler-namespace> deployment/wva-controller | grep "Capacity scaling"
    ```
 
    Expected logs:
@@ -478,12 +508,12 @@ DEBUG Applied capacity scaling override key=my-override modelID=ibm/granite-13b 
    ```
 
 3. **If no logs appear, verify watch is working:**
-   - Check controller pod is running: `kubectl get pods -n workload-variant-autoscaler-system`
-   - Check for errors: `kubectl logs -n workload-variant-autoscaler-system deployment/wva-controller --tail=100`
+   - Check controller pod is running: `kubectl get pods -n <workload-variant-autoscaler-namespace>`
+   - Check for errors: `kubectl logs -n <workload-variant-autoscaler-namespace> deployment/wva-controller --tail=100`
 
 4. **Manual restart (last resort):**
    ```bash
-   kubectl rollout restart deployment/wva-controller -n workload-variant-autoscaler-system
+   kubectl rollout restart deployment/wva-controller -n <workload-variant-autoscaler-namespace>
    ```
 
 ### Cache Initialization Failed
@@ -504,7 +534,7 @@ WARN Failed to load initial capacity scaling config, will use defaults
 
 3. Verify cache loaded:
    ```bash
-   kubectl logs -n workload-variant-autoscaler-system deployment/wva-controller | grep "Capacity scaling configuration loaded"
+   kubectl logs -n <workload-variant-autoscaler-namespace> deployment/wva-controller | grep "Capacity scaling configuration loaded"
    ```
 
 ## Example: Production Setup
@@ -515,7 +545,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: capacity-scaling-config
-  namespace: workload-variant-autoscaler-system
+  namespace: <workload-variant-autoscaler-namespace>
 data:
   # Conservative defaults for most workloads
   default: |
@@ -550,8 +580,8 @@ kubectl apply -f deploy/configmap-capacity-scaling.yaml
 
 Verify deployment:
 ```bash
-kubectl get cm capacity-scaling-config -n workload-variant-autoscaler-system
-kubectl describe cm capacity-scaling-config -n workload-variant-autoscaler-system
+kubectl get cm capacity-scaling-config -n <workload-variant-autoscaler-namespace>
+kubectl describe cm capacity-scaling-config -n <workload-variant-autoscaler-namespace>
 ```
 
 ## API Reference
@@ -600,11 +630,3 @@ The caching mechanism uses the following components:
 - Controller starts successfully even if ConfigMap missing
 - Uses hardcoded defaults as fallback
 - Automatically loads config once ConfigMap becomes available
-
-## Future Enhancements
-
-Potential future features:
-- Integration of threshold values with Inference Scheduler
-- Time-based configuration (e.g., aggressive scaling during peak hours)
-- Dynamic threshold adjustment based on historical metrics
-- Metric-based cache invalidation (detect stale configs)
