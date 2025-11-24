@@ -216,7 +216,7 @@ var _ = Describe("Capacity Model: Full Lifecycle Test", Ordered, func() {
 			By(fmt.Sprintf("monitoring for %v - waiting for metrics and scaling", currentPhase.Duration))
 			monitoringStart := time.Now()
 			var finalReplicas int32
-		var peakReplicas int32 = startReplicas
+			var peakReplicas = startReplicas
 
 			// Monitor every 20 seconds
 			ticker := time.NewTicker(20 * time.Second)
