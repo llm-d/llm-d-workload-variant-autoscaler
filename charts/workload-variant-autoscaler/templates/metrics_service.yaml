@@ -4,7 +4,8 @@ metadata:
   labels:
     control-plane: controller-manager
     app.kubernetes.io/name: workload-variant-autoscaler
-  name: workload-variant-autoscaler-controller-manager-metrics-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ .Release.Name }}-wva-controller-manager-metrics-service
   namespace: {{ .Release.Namespace }}
 spec:
   ports:

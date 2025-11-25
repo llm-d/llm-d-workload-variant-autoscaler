@@ -9,8 +9,11 @@ kind: ConfigMap
 # - cost is the cents/hour cost of this accelerator
 #
 metadata:
-  name: service-classes-config
+  name: {{ .Release.Name }}-wva-service-classes
   namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: workload-variant-autoscaler
+    app.kubernetes.io/instance: {{ .Release.Name }}
 data:
   premium.yaml: |
     name: Premium

@@ -1,7 +1,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: workload-variant-autoscaler-monitoring
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-wva-monitoring
   labels:
     app.kubernetes.io/name: workload-variant-autoscaler
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -11,5 +11,5 @@ roleRef:
   name: cluster-monitoring-view
 subjects:
   - kind: ServiceAccount
-    name: workload-variant-autoscaler-controller-manager
+    name: {{ .Release.Name }}-wva-controller-manager
     namespace: {{ .Release.Namespace }}

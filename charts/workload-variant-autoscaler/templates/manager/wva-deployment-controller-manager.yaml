@@ -1,11 +1,12 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: workload-variant-autoscaler-controller-manager
+  name: {{ .Release.Name }}-wva-controller-manager
   namespace: {{ .Release.Namespace }}
   labels:
     control-plane: controller-manager
     app.kubernetes.io/name: workload-variant-autoscaler
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   selector:
     matchLabels:
@@ -65,29 +66,29 @@ spec:
           - name: PROMETHEUS_BASE_URL
             valueFrom:
               configMapKeyRef:
-                name: workload-variant-autoscaler-variantautoscaling-config
+                name: {{ .Release.Name }}-wva-config
                 key: PROMETHEUS_BASE_URL
           - name: PROMETHEUS_TLS_INSECURE_SKIP_VERIFY
             valueFrom:
               configMapKeyRef:
-                name: workload-variant-autoscaler-variantautoscaling-config
+                name: {{ .Release.Name }}-wva-config
                 key: PROMETHEUS_TLS_INSECURE_SKIP_VERIFY
           - name: PROMETHEUS_CA_CERT_PATH
             valueFrom:
               configMapKeyRef:
-                name: workload-variant-autoscaler-variantautoscaling-config
+                name: {{ .Release.Name }}-wva-config
                 key: PROMETHEUS_CA_CERT_PATH
           - name: PROMETHEUS_TOKEN_PATH
             value: "/var/run/secrets/kubernetes.io/serviceaccount/token"
           - name: WVA_SCALE_TO_ZERO
             valueFrom:
               configMapKeyRef:
-                name: workload-variant-autoscaler-variantautoscaling-config
+                name: {{ .Release.Name }}-wva-config
                 key: WVA_SCALE_TO_ZERO
           - name:  EXPERIMENTAL_HYBRID_OPTIMIZATION
             valueFrom:
               configMapKeyRef:
-                name: workload-variant-autoscaler-variantautoscaling-config
+                name: {{ .Release.Name }}-wva-config
                 key:  EXPERIMENTAL_HYBRID_OPTIMIZATION
           - name: POD_NAMESPACE
             valueFrom:
@@ -137,7 +138,7 @@ spec:
       volumes:
       - name: prometheus-ca-cert
         configMap:
-          name: prometheus-ca
+          name: {{ .Release.Name }}-wva-prometheus-ca
           optional: true
-      serviceAccountName: workload-variant-autoscaler-controller-manager
+      serviceAccountName: {{ .Release.Name }}-wva-controller-manager
       terminationGracePeriodSeconds: 10

@@ -1,8 +1,11 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: prometheus-ca
+  name: {{ .Release.Name }}-wva-prometheus-ca
   namespace: {{ .Values.wva.prometheus.monitoringNamespace }}
+  labels:
+    app.kubernetes.io/name: workload-variant-autoscaler
+    app.kubernetes.io/instance: {{ .Release.Name }}
 data:
   ca.crt: |
     {{- if .Values.wva.prometheus.caCert }}
