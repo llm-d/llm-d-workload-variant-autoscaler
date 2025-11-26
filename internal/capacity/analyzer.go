@@ -38,7 +38,6 @@ func (a *Analyzer) AnalyzeModelCapacity(
 			AnalyzedAt:      time.Now(),
 			TotalReplicas:   0,
 			ShouldScaleUp:   false,
-			ShouldScaleDown: false,
 			ScaleDownSafe:   false,
 			VariantAnalyses: []interfaces.VariantCapacityAnalysis{},
 		}, nil
@@ -113,7 +112,7 @@ func (a *Analyzer) AnalyzeModelCapacity(
 	)
 
 	// Step 4: Determine if scale-down is safe
-	analysis.ShouldScaleDown, analysis.ScaleDownSafe = a.isScaleDownSafe(
+	analysis.ScaleDownSafe = a.isScaleDownSafe(
 		replicaMetrics,
 		config,
 	)
@@ -216,17 +215,15 @@ func (a *Analyzer) shouldScaleUp(
 	}
 }
 
-// isScaleDownSafe simulates realistic load redistribution after removing one replica.
-// Returns (shouldScaleDown, isSafe) where:
-// - shouldScaleDown: always false (capacity analyzer only approves, doesn't initiate scale-down)
-// - isSafe: true if removing one replica would leave adequate headroom
+// isScaleDownSafe determines if scale-down is safe by simulating the removal of one replica.
+// Returns true if removing one replica would leave adequate headroom.
 //
 // Algorithm: Calculates total current load across non-saturated replicas, then simulates
 // redistributing that load across (N-1) replicas to determine if spare capacity remains adequate.
 func (a *Analyzer) isScaleDownSafe(
 	replicaMetrics []interfaces.ReplicaMetrics,
 	config interfaces.CapacityScalingConfig,
-) (bool, bool) {
+) bool {
 
 	// Collect non-saturated replicas
 	var nonSaturatedMetrics []interfaces.ReplicaMetrics
@@ -245,7 +242,7 @@ func (a *Analyzer) isScaleDownSafe(
 	if nonSaturatedCount < MinNonSaturatedReplicasForScaleDown {
 		logger.Log.Debugf("Scale-down unsafe: insufficient non-saturated replicas: nonSaturated=%d, required=%d",
 			nonSaturatedCount, MinNonSaturatedReplicasForScaleDown)
-		return false, false
+		return false
 	}
 
 	// Calculate total load across all non-saturated replicas
@@ -276,8 +273,7 @@ func (a *Analyzer) isScaleDownSafe(
 			remainingSpareKv, config.KvSpareTrigger, kvSafe, remainingSpareQueue, config.QueueSpareTrigger, queueSafe)
 	}
 
-	// Capacity analyzer never initiates scale-down, only approves/denies
-	return false, isSafe
+	return isSafe
 }
 
 // CalculateCapacityTargets determines target replicas per variant based on capacity analysis.

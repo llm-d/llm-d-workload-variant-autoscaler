@@ -216,10 +216,7 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 		if enableCapacityAnalyzer {
 			// Collect metrics and populate CurrentAlloc for capacity-only mode
 			// This validates metrics availability and populates the VariantAutoscalings with CurrentAlloc
-			if err := r.collectMetricsForCapacityMode(ctx, modelVAs, vaMap); err != nil {
-				logger.Log.Errorf("Failed to collect metrics for capacity mode: modelID=%s, error=%v", modelID, err)
-				// Metrics collection error - individual VAs are skipped
-			}
+			r.collectMetricsForCapacityMode(ctx, modelVAs, vaMap)
 
 			// Get capacity config for this model (with fallback to default)
 			capacityConfig := interfaces.DefaultCapacityScalingConfig()
@@ -251,15 +248,9 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 			if err != nil {
 				logger.Log.Errorf("Unable to read accelerator configMap: %v", err)
 				errorCount++
-				// Fall back to capacity-only for this model
-				if capacityAnalysis != nil {
-					finalDecisions = convertCapacityTargetsToDecisions(capacityTargets, capacityAnalysis, variantStates)
-				} else {
-					// Capacity also failed - activate safety net
-					logger.Log.Warnf("Config read failed and capacity unavailable, activating safety net: modelID=%s", modelID)
-					r.emitSafetyNetMetrics(ctx, modelVAs)
-				}
-				allDecisions = append(allDecisions, finalDecisions...)
+				allDecisions = append(allDecisions, r.fallbackToCapacityOrSafetyNet(
+					ctx, capacityAnalysis, capacityTargets, variantStates, modelID, modelVAs,
+					"accelerator config read failed")...)
 				continue
 			}
 
@@ -267,15 +258,9 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 			if err != nil {
 				logger.Log.Errorf("Unable to read serviceclass configMap: %v", err)
 				errorCount++
-				// Fall back to capacity-only for this model
-				if capacityAnalysis != nil {
-					finalDecisions = convertCapacityTargetsToDecisions(capacityTargets, capacityAnalysis, variantStates)
-				} else {
-					// Capacity also failed - activate safety net
-					logger.Log.Warnf("Config read failed and capacity unavailable, activating safety net: modelID=%s", modelID)
-					r.emitSafetyNetMetrics(ctx, modelVAs)
-				}
-				allDecisions = append(allDecisions, finalDecisions...)
+				allDecisions = append(allDecisions, r.fallbackToCapacityOrSafetyNet(
+					ctx, capacityAnalysis, capacityTargets, variantStates, modelID, modelVAs,
+					"serviceclass config read failed")...)
 				continue
 			}
 
@@ -285,14 +270,9 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 			if err != nil {
 				logger.Log.Errorf("Failed to prepare variant autoscalings: %v", err)
 				errorCount++
-				if capacityAnalysis != nil {
-					finalDecisions = convertCapacityTargetsToDecisions(capacityTargets, capacityAnalysis, variantStates)
-				} else {
-					// Capacity also failed - activate safety net
-					logger.Log.Warnf("Variant preparation failed and capacity unavailable, activating safety net: modelID=%s", modelID)
-					r.emitSafetyNetMetrics(ctx, modelVAs)
-				}
-				allDecisions = append(allDecisions, finalDecisions...)
+				allDecisions = append(allDecisions, r.fallbackToCapacityOrSafetyNet(
+					ctx, capacityAnalysis, capacityTargets, variantStates, modelID, modelVAs,
+					"variant preparation failed")...)
 				continue
 			}
 
@@ -410,10 +390,7 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// STEP 3: Apply all decisions
 	if len(allDecisions) > 0 {
 		logger.Log.Infof("Applying scaling decisions: totalDecisions=%d", len(allDecisions))
-		if err := r.applyCapacityDecisions(ctx, allDecisions, vaMap); err != nil {
-			logger.Log.Errorf("Failed to apply capacity decisions: %v", err)
-			return ctrl.Result{RequeueAfter: requeueDuration}, nil
-		}
+		r.applyCapacityDecisions(ctx, allDecisions, vaMap)
 	} else {
 		logger.Log.Info("No scaling decisions to apply")
 	}
@@ -476,10 +453,11 @@ func (r *VariantAutoscalingReconciler) groupVAsByModel(
 }
 
 // buildVariantStates extracts current and desired replica counts from VAs for capacity analysis.
+// Individual deployment fetch failures are logged and fall back to status values.
 func (r *VariantAutoscalingReconciler) buildVariantStates(
 	ctx context.Context,
 	vas []llmdVariantAutoscalingV1alpha1.VariantAutoscaling,
-) ([]interfaces.VariantReplicaState, error) {
+) []interfaces.VariantReplicaState {
 	states := make([]interfaces.VariantReplicaState, 0, len(vas))
 
 	for _, va := range vas {
@@ -508,7 +486,7 @@ func (r *VariantAutoscalingReconciler) buildVariantStates(
 		})
 	}
 
-	return states, nil
+	return states
 }
 
 // convertCapacityTargetsToDecisions converts capacity-only targets to VariantDecisions.
@@ -645,10 +623,7 @@ func (r *VariantAutoscalingReconciler) runCapacityAnalysis(
 		capacityAnalysis.ShouldScaleUp, capacityAnalysis.ScaleDownSafe)
 
 	// Build variant states (current and desired replicas)
-	variantStates, err := r.buildVariantStates(ctx, modelVAs)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to build variant states for model %s: %w", modelID, err)
-	}
+	variantStates := r.buildVariantStates(ctx, modelVAs)
 
 	// Calculate capacity-based targets
 	capacityTargets := capacityAnalyzer.CalculateCapacityTargets(capacityAnalysis, variantStates)
@@ -660,11 +635,12 @@ func (r *VariantAutoscalingReconciler) runCapacityAnalysis(
 }
 
 // collectMetricsForCapacityMode collects metrics and populates CurrentAlloc for VAs in capacity-only mode.
+// Individual VA failures are logged and skipped; this function never fails the overall operation.
 func (r *VariantAutoscalingReconciler) collectMetricsForCapacityMode(
 	ctx context.Context,
 	modelVAs []llmdVariantAutoscalingV1alpha1.VariantAutoscaling,
 	vaMap map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling,
-) error {
+) {
 	for i := range modelVAs {
 		va := &modelVAs[i]
 		modelName := va.Spec.ModelID
@@ -747,16 +723,15 @@ func (r *VariantAutoscalingReconciler) collectMetricsForCapacityMode(
 			currentAllocation.ITLAverage,
 			currentAllocation.VariantCost)
 	}
-
-	return nil
 }
 
 // applyCapacityDecisions updates VA status and emits metrics based on capacity decisions.
+// Individual decision failures are logged and skipped; this function never fails the overall operation.
 func (r *VariantAutoscalingReconciler) applyCapacityDecisions(
 	ctx context.Context,
 	decisions []interfaces.VariantDecision,
 	vaMap map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling,
-) error {
+) {
 	for _, decision := range decisions {
 		logger.Log.Infof("Processing decision: variant=%s, action=%s, current=%d→target=%d",
 			decision.VariantName, decision.Action, decision.CurrentReplicas, decision.TargetReplicas)
@@ -838,8 +813,6 @@ func (r *VariantAutoscalingReconciler) applyCapacityDecisions(
 		logger.Log.Infof("Applied capacity decision: variant=%s, action=%s, current=%d, target=%d, reason=%s",
 			decision.VariantName, decision.Action, decision.CurrentReplicas, decision.TargetReplicas, decision.Reason)
 	}
-
-	return nil
 }
 
 // emitSafetyNetMetrics emits fallback metrics when capacity analysis fails.
@@ -923,6 +896,29 @@ func (r *VariantAutoscalingReconciler) emitSafetyNetMetrics(
 			accelerator,
 			fallbackSource)
 	}
+}
+
+// fallbackToCapacityOrSafetyNet handles hybrid mode failures by falling back
+// to capacity-only decisions, or safety net if capacity is also unavailable.
+// Returns the fallback decisions (may be empty if safety net was activated).
+func (r *VariantAutoscalingReconciler) fallbackToCapacityOrSafetyNet(
+	ctx context.Context,
+	capacityAnalysis *interfaces.ModelCapacityAnalysis,
+	capacityTargets map[string]int,
+	variantStates []interfaces.VariantReplicaState,
+	modelID string,
+	modelVAs []llmdVariantAutoscalingV1alpha1.VariantAutoscaling,
+	errContext string,
+) []interfaces.VariantDecision {
+	if capacityAnalysis != nil {
+		logger.Log.Infof("Falling back to capacity-only: %s, modelID=%s", errContext, modelID)
+		return convertCapacityTargetsToDecisions(capacityTargets, capacityAnalysis, variantStates)
+	}
+
+	// Capacity also failed - activate safety net
+	logger.Log.Warnf("%s and capacity unavailable, activating safety net: modelID=%s", errContext, modelID)
+	r.emitSafetyNetMetrics(ctx, modelVAs)
+	return nil
 }
 
 // prepareVariantAutoscalings collects and prepares all data for optimization.
