@@ -134,9 +134,9 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 			g.Expect(err).NotTo(HaveOccurred(), "Should be able to get VariantAutoscaling")
 
 			scaledOptimized = int32(va.Status.DesiredOptimizedAlloc.NumReplicas)
-			currentRateStr := va.Status.CurrentAlloc.Load.ArrivalRate
-			_, _ = fmt.Fprintf(GinkgoWriter, "Current optimized replicas: %d (initial: %d), arrival rate: %s\n",
-				scaledOptimized, initialOptimized, currentRateStr)
+			// Note: In the new single-variant API, load metrics are not stored in the VA status.
+			_, _ = fmt.Fprintf(GinkgoWriter, "Current optimized replicas: %d (initial: %d)\n",
+				scaledOptimized, initialOptimized)
 
 			// Expect scale-up recommendation (more than initial)
 			if !lowLoad {

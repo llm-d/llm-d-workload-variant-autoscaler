@@ -34,6 +34,56 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// Helper function to create a test VariantAutoscaling
+func createTestVA(name, namespace string, currentReplicas, desiredReplicas int32) *llmdVariantAutoscalingV1alpha1.VariantAutoscaling {
+	return &llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"inference.optimization/acceleratorName": "A100",
+			},
+		},
+		Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
+			ScaleTargetRef: llmdVariantAutoscalingV1alpha1.CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       name,
+			},
+			ModelID:          "test-model/variant-1",
+			VariantID:        "test-model/variant-1-A100-1",
+			Accelerator:      "A100",
+			AcceleratorCount: 1,
+			VariantCost:      "10.00",
+			SLOClassRef: llmdVariantAutoscalingV1alpha1.ConfigMapKeyRef{
+				Name: "test-slo-config",
+				Key:  "test-slo-key",
+			},
+			VariantProfile: llmdVariantAutoscalingV1alpha1.VariantProfile{
+				PerfParms: llmdVariantAutoscalingV1alpha1.PerfParms{
+					DecodeParms: map[string]string{
+						"alpha": "20.58",
+						"beta":  "0.41",
+					},
+					PrefillParms: map[string]string{
+						"gamma": "200.58",
+						"delta": "0.041",
+					},
+				},
+				MaxBatchSize: 32,
+			},
+		},
+		Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
+			CurrentAlloc: llmdVariantAutoscalingV1alpha1.Allocation{
+				NumReplicas: currentReplicas,
+			},
+			DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
+				NumReplicas: desiredReplicas,
+			},
+		},
+	}
+}
+
 var _ = Describe("Actuator", func() {
 	var (
 		ctx          context.Context
@@ -76,7 +126,7 @@ var _ = Describe("Actuator", func() {
 		})
 	})
 
-	Context("Testing GetCurrentDeploymentReplicas", func() {
+	Context("Testing getCurrentDeploymentReplicas", func() {
 		var deployment *appsv1.Deployment
 		var va *llmdVariantAutoscalingV1alpha1.VariantAutoscaling
 
@@ -111,12 +161,7 @@ var _ = Describe("Actuator", func() {
 				},
 			}
 
-			va = &llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      resourceName,
-					Namespace: namespace,
-				},
-			}
+			va = createTestVA(resourceName, namespace, 3, 3)
 
 			Expect(k8sClient.Create(ctx, deployment)).To(Succeed())
 		})
@@ -136,12 +181,7 @@ var _ = Describe("Actuator", func() {
 		})
 
 		It("should return error when deployment doesn't exist", func() {
-			nonExistentVA := &llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "non-existent",
-					Namespace: namespace,
-				},
-			}
+			nonExistentVA := createTestVA("non-existent", namespace, 0, 0)
 
 			_, err := actuator.GetCurrentDeploymentReplicas(ctx, nonExistentVA)
 			Expect(err).To(HaveOccurred())
@@ -187,64 +227,10 @@ var _ = Describe("Actuator", func() {
 				},
 			}
 
-			va = &llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      contextResourceName,
-					Namespace: namespace,
-					Labels: map[string]string{
-						"inference.optimization/acceleratorName": "A100",
-					},
-				},
-				Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
-					ModelID: "test-model/variant-1",
-					SLOClassRef: llmdVariantAutoscalingV1alpha1.ConfigMapKeyRef{
-						Name: "test-slo-config",
-						Key:  "test-slo-key",
-					},
-					ModelProfile: llmdVariantAutoscalingV1alpha1.ModelProfile{
-						Accelerators: []llmdVariantAutoscalingV1alpha1.AcceleratorProfile{
-							{
-								Acc:      "A100",
-								AccCount: 1,
-								PerfParms: llmdVariantAutoscalingV1alpha1.PerfParms{
-									DecodeParms: map[string]string{
-										"alpha": "20.58",
-										"beta":  "0.41",
-									},
-									PrefillParms: map[string]string{
-										"gamma": "200.58",
-										"delta": "0.041",
-									},
-								},
-								MaxBatchSize: 32,
-							},
-						},
-					},
-				},
-				Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
-					CurrentAlloc: llmdVariantAutoscalingV1alpha1.Allocation{
-						NumReplicas: 2,
-						Accelerator: "A100",
-						MaxBatch:    32,
-						VariantCost: "10.5",
-						ITLAverage:  "100.0",
-						// WaitAverage: "50.0",
-						Load: llmdVariantAutoscalingV1alpha1.LoadProfile{
-							ArrivalRate: "10.0",
-							// AvgLength:   "512",
-						},
-					},
-					DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
-						NumReplicas: 4,
-						Accelerator: "A100",
-					},
-				},
-			}
+			va = createTestVA(contextResourceName, namespace, 2, 4)
 
 			Expect(k8sClient.Create(ctx, deployment)).To(Succeed())
 			Expect(k8sClient.Create(ctx, va)).To(Succeed())
-			va.Status.DesiredOptimizedAlloc.NumReplicas = 4
-			va.Status.DesiredOptimizedAlloc.Accelerator = "A100"
 		})
 
 		AfterEach(func() {
@@ -339,61 +325,10 @@ var _ = Describe("Actuator", func() {
 				},
 			}
 
-			va = &llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      contextResourceName,
-					Namespace: namespace,
-				},
-				Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
-					ModelID: "test-model/metrics-test",
-					SLOClassRef: llmdVariantAutoscalingV1alpha1.ConfigMapKeyRef{
-						Name: "test-slo-config",
-						Key:  "metrics-slo-key",
-					},
-					ModelProfile: llmdVariantAutoscalingV1alpha1.ModelProfile{
-						Accelerators: []llmdVariantAutoscalingV1alpha1.AcceleratorProfile{
-							{
-								Acc:      "A100",
-								AccCount: 1,
-								PerfParms: llmdVariantAutoscalingV1alpha1.PerfParms{
-									DecodeParms: map[string]string{
-										"alpha": "20.58",
-										"beta":  "0.41",
-									},
-									PrefillParms: map[string]string{
-										"gamma": "200.58",
-										"delta": "0.041",
-									},
-								},
-								MaxBatchSize: 32,
-							},
-						},
-					},
-				},
-				Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
-					CurrentAlloc: llmdVariantAutoscalingV1alpha1.Allocation{
-						NumReplicas: 1,
-						Accelerator: "A100",
-						MaxBatch:    32,
-						VariantCost: "5.0",
-						ITLAverage:  "80.0",
-						// WaitAverage: "30.0",
-						Load: llmdVariantAutoscalingV1alpha1.LoadProfile{
-							ArrivalRate: "5.0",
-							// AvgLength:   "256",
-						},
-					},
-					DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
-						NumReplicas: 3,
-						Accelerator: "A100",
-					},
-				},
-			}
+			va = createTestVA(contextResourceName, namespace, 1, 3)
 
 			Expect(k8sClient.Create(ctx, deployment)).To(Succeed())
 			Expect(k8sClient.Create(ctx, va)).To(Succeed())
-			va.Status.DesiredOptimizedAlloc.NumReplicas = 3
-			va.Status.DesiredOptimizedAlloc.Accelerator = "A100"
 
 		})
 
@@ -430,45 +365,7 @@ var _ = Describe("Actuator", func() {
 	Context("Edge cases and error handling", func() {
 		It("should handle VariantAutoscaling with missing status fields", func() {
 			// Create a minimal valid VariantAutoscaling but with zero desired replicas
-			va := &llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "incomplete-va",
-					Namespace: namespace,
-				},
-				Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
-					ModelID: "test-model/incomplete",
-					SLOClassRef: llmdVariantAutoscalingV1alpha1.ConfigMapKeyRef{
-						Name: "test-slo-config",
-						Key:  "test-slo-key",
-					},
-					ModelProfile: llmdVariantAutoscalingV1alpha1.ModelProfile{
-						Accelerators: []llmdVariantAutoscalingV1alpha1.AcceleratorProfile{
-							{
-								Acc:      "A100",
-								AccCount: 1,
-								PerfParms: llmdVariantAutoscalingV1alpha1.PerfParms{
-									DecodeParms: map[string]string{
-										"alpha": "20.58",
-										"beta":  "0.41",
-									},
-									PrefillParms: map[string]string{
-										"gamma": "200.58",
-										"delta": "0.041",
-									},
-								},
-								MaxBatchSize: 32,
-							},
-						},
-					},
-				},
-				Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
-					// DesiredOptimizedAlloc.NumReplicas will be 0 by default
-					DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
-						NumReplicas: 0, // This should cause EmitMetrics to skip
-						Accelerator: "A100",
-					},
-				},
-			}
+			va := createTestVA("incomplete-va", namespace, 0, 0)
 
 			Expect(k8sClient.Create(ctx, va)).To(Succeed())
 			defer func() {
@@ -518,61 +415,10 @@ var _ = Describe("Actuator", func() {
 				},
 			}
 
-			va = &llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      contextResourceName,
-					Namespace: namespace,
-				},
-				Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
-					ModelID: "test-model/validation-test",
-					SLOClassRef: llmdVariantAutoscalingV1alpha1.ConfigMapKeyRef{
-						Name: "test-slo-config",
-						Key:  "validation-slo-key",
-					},
-					ModelProfile: llmdVariantAutoscalingV1alpha1.ModelProfile{
-						Accelerators: []llmdVariantAutoscalingV1alpha1.AcceleratorProfile{
-							{
-								Acc:      "A100",
-								AccCount: 1,
-								PerfParms: llmdVariantAutoscalingV1alpha1.PerfParms{
-									DecodeParms: map[string]string{
-										"alpha": "20.58",
-										"beta":  "0.41",
-									},
-									PrefillParms: map[string]string{
-										"gamma": "200.58",
-										"delta": "0.041",
-									},
-								},
-								MaxBatchSize: 32,
-							},
-						},
-					},
-				},
-				Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
-					CurrentAlloc: llmdVariantAutoscalingV1alpha1.Allocation{
-						NumReplicas: 2,
-						Accelerator: "A100",
-						MaxBatch:    32,
-						VariantCost: "10.0",
-						ITLAverage:  "90.0",
-						// WaitAverage: "40.0",
-						Load: llmdVariantAutoscalingV1alpha1.LoadProfile{
-							ArrivalRate: "8.0",
-							// AvgLength:   "384",
-						},
-					},
-					DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
-						NumReplicas: 5,
-						Accelerator: "A100",
-					},
-				},
-			}
+			va = createTestVA(contextResourceName, namespace, 2, 5)
 
 			Expect(k8sClient.Create(ctx, deployment)).To(Succeed())
 			Expect(k8sClient.Create(ctx, va)).To(Succeed())
-			va.Status.DesiredOptimizedAlloc.NumReplicas = 5
-			va.Status.DesiredOptimizedAlloc.Accelerator = "A100"
 
 		})
 

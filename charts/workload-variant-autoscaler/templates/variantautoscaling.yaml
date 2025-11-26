@@ -1,64 +1,55 @@
 {{- if .Values.va.enabled }}
 apiVersion: llmd.ai/v1alpha1
-# Optimizing a variant, create only when the model is deployed and serving traffic
-# this is for the collector the collect existing (previous) running metrics of the variant.
+# Single-variant autoscaling resource - create one VariantAutoscaling CR per variant
+# This should only be created when the model is deployed and serving traffic
 kind: VariantAutoscaling
 metadata:
-  # Unique name of the variant
+  # Name typically matches the Deployment name (Kubernetes DNS-1123 compliant)
   name: {{ printf "%s-decode" .Values.llmd.modelName }}
   namespace: {{ .Values.llmd.namespace }}
   labels:
     inference.optimization/acceleratorName: {{ .Values.va.accelerator }}
-# This is essentially static input to the optimizer
 spec:
+  # Reference to the target Deployment to scale
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ printf "%s-decode" .Values.llmd.modelName }}
+
   # OpenAI API compatible name of the model
   modelID: {{ .Values.llmd.modelID | quote }}
-  {{- if .Values.wva.experimentalHybridOptimization }}
-  # Add SLOs in configmap, add reference to this per model data
-  # to avoid duplication and Move to ISOs when available
+
+  # Business identifier for this variant (model + accelerator + count combination)
+  # Format: {modelID}-{accelerator}-{acceleratorCount}
+  # May contain slashes, dots, mixed case (not restricted to DNS-1123)
+  variantID: {{ .Values.va.variantID | quote }}
+
+  # Accelerator type for this variant
+  accelerator: {{ .Values.va.accelerator | quote }}
+
+  # Number of accelerator units per replica
+  acceleratorCount: {{ .Values.va.acceleratorCount }}
+
+  # Cost per replica for this variant (optional, defaults to "10")
+  {{- if .Values.va.variantCost }}
+  variantCost: {{ .Values.va.variantCost | quote }}
+  {{- end }}
+
+  # SLO configuration reference
   sloClassRef:
-    # Configmap name to load in the same namespace as optimizer object
-    # we start with static (non-changing) ConfigMaps (for ease of implementation only)
     name: premium-slo
-    # Key (modelID) present inside configmap
     key: opt-125m
-  # Static profiled benchmarked data for a variant running on different accelerators
-  modelProfile:
-    accelerators:
-      - acc: "L40S"
-        accCount: 1
-        perfParms: 
-          decodeParms:
-            alpha: "22.619"
-            beta: "0.181"
-          prefillParms:
-            gamma: "226.19"
-            delta: "0.018"
-        maxBatchSize: 512
-      - acc: "H100"
-        accCount: 1
-        perfParms: 
-          decodeParms:
-            # Decode parameters for ITL equation: itl = alpha + beta * maxBatchSize
-            alpha: "7.470"
-            beta: "0.044"
-          # Prefill parameters for TTFT equation: ttft = gamma + delta * tokens * maxBatchSize  
-          prefillParms:
-            gamma: "15.415"
-            delta: "0.000337"
-        maxBatchSize: 512
-      - acc: "A100"
-        accCount: 1
-        perfParms: 
-          decodeParms:
-            # Decode parameters for ITL equation: itl = alpha + beta * maxBatchSize
-            alpha: "20.58"
-            beta: "0.41"
-          # Prefill parameters for TTFT equation: ttft = gamma + delta * tokens * maxBatchSize  
-          prefillParms:
-            gamma: "5.2"
-            delta: "0.1"
-        maxBatchSize: 4
-  {{- end}} 
-   
+
+  # Performance profile for this specific variant
+  variantProfile:
+    perfParms:
+      decodeParms:
+        # Decode parameters for ITL equation: itl = alpha + beta * maxBatchSize
+        alpha: {{ .Values.va.perfParms.decodeParms.alpha | quote }}
+        beta: {{ .Values.va.perfParms.decodeParms.beta | quote }}
+      prefillParms:
+        # Prefill parameters for TTFT equation: ttft = gamma + delta * tokens * maxBatchSize
+        gamma: {{ .Values.va.perfParms.prefillParms.gamma | quote }}
+        delta: {{ .Values.va.perfParms.prefillParms.delta | quote }}
+    maxBatchSize: {{ .Values.va.maxBatchSize }}
 {{- end }}

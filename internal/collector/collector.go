@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strconv"
 	"time"
 
 	llmdVariantAutoscalingV1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
@@ -155,11 +154,15 @@ func ValidateMetricsAvailability(ctx context.Context, promAPI promv1.API, modelN
 	}
 }
 
+// AddMetricsToOptStatus collects metrics from Prometheus and returns current allocation state.
+// In single-variant architecture, metrics are returned as separate values to be passed to the optimizer,
+// rather than being stored in status fields.
+// Returns: (allocation, arrivalRate, avgInputTokens, avgOutputTokens, itlAverage, ttftAverage, error)
 func AddMetricsToOptStatus(ctx context.Context,
 	opt *llmdVariantAutoscalingV1alpha1.VariantAutoscaling,
 	deployment appsv1.Deployment,
 	acceleratorCostVal float64,
-	promAPI promv1.API) (llmdVariantAutoscalingV1alpha1.Allocation, error) {
+	promAPI promv1.API) (llmdVariantAutoscalingV1alpha1.Allocation, float64, float64, float64, float64, float64, error) {
 
 	deployNamespace := deployment.Namespace
 	modelName := opt.Spec.ModelID
@@ -210,81 +213,50 @@ func AddMetricsToOptStatus(ctx context.Context,
 
 	// --- 2. Execute Queries ---
 
-	arrivalVal, err := queryAndExtractMetric(ctx, promAPI, arrivalQuery, "ArrivalRate")
+	arrivalRate, err := queryAndExtractMetric(ctx, promAPI, arrivalQuery, "ArrivalRate")
 	if err != nil {
-		return llmdVariantAutoscalingV1alpha1.Allocation{}, err
+		return llmdVariantAutoscalingV1alpha1.Allocation{}, 0, 0, 0, 0, 0, err
 	}
-	arrivalVal *= 60 // convert from req/sec to req/min
+	arrivalRate *= 60 // convert from req/sec to req/min
 
 	avgInputTokens, err := queryAndExtractMetric(ctx, promAPI, avgPromptToksQuery, "AvgInputTokens")
 	if err != nil {
-		return llmdVariantAutoscalingV1alpha1.Allocation{}, err
+		return llmdVariantAutoscalingV1alpha1.Allocation{}, 0, 0, 0, 0, 0, err
 	}
 
 	avgOutputTokens, err := queryAndExtractMetric(ctx, promAPI, avgDecToksQuery, "AvgOutputTokens")
 	if err != nil {
-		return llmdVariantAutoscalingV1alpha1.Allocation{}, err
+		return llmdVariantAutoscalingV1alpha1.Allocation{}, 0, 0, 0, 0, 0, err
 	}
 
-	ttftAverageTime, err := queryAndExtractMetric(ctx, promAPI, ttftQuery, "TTFTAverageTime")
+	ttftAverage, err := queryAndExtractMetric(ctx, promAPI, ttftQuery, "TTFTAverageTime")
 	if err != nil {
-		return llmdVariantAutoscalingV1alpha1.Allocation{}, err
+		return llmdVariantAutoscalingV1alpha1.Allocation{}, 0, 0, 0, 0, 0, err
 	}
-	ttftAverageTime *= 1000 // convert to msec
+	ttftAverage *= 1000 // convert from seconds to milliseconds
 
 	itlAverage, err := queryAndExtractMetric(ctx, promAPI, itlQuery, "ITLAverage")
 	if err != nil {
-		return llmdVariantAutoscalingV1alpha1.Allocation{}, err
+		return llmdVariantAutoscalingV1alpha1.Allocation{}, 0, 0, 0, 0, 0, err
 	}
-	itlAverage *= 1000 // convert to msec
+	itlAverage *= 1000 // convert from seconds to milliseconds
 
-	// --- 3. Collect K8s and Static Info ---
+	// --- 3. Collect K8s Info ---
 
-	// number of replicas
-	numReplicas := int(*deployment.Spec.Replicas)
-
-	// accelerator type - strict validation required
-	acc := ""
-	if val, ok := opt.Labels["inference.optimization/acceleratorName"]; ok && val != "" {
-		acc = val
-	} else {
-		return llmdVariantAutoscalingV1alpha1.Allocation{},
-			fmt.Errorf("missing or empty acceleratorName label on VariantAutoscaling object: %s", opt.Name)
+	// Get current replica count from deployment
+	numReplicas := int32(0)
+	if deployment.Spec.Replicas != nil {
+		numReplicas = *deployment.Spec.Replicas
 	}
 
-	// cost
-	discoveredCost := float64(*deployment.Spec.Replicas) * acceleratorCostVal
-
-	// max batch size
-	// TODO: collect value from server
-	maxBatch := 256
-
-	// --- 4. Populate Allocation Status ---
-
-	// Format metric values, ensuring they meet CRD validation regex '^\\d+(\\.\\d+)?$'
-	// If values are 0, FormatFloat will produce "0.00" which is valid
-	variantCostStr := strconv.FormatFloat(discoveredCost, 'f', 2, 64)
-	ttftAverageStr := strconv.FormatFloat(ttftAverageTime, 'f', 2, 64)
-	itlAverageStr := strconv.FormatFloat(itlAverage, 'f', 2, 64)
-	arrivalRateStr := strconv.FormatFloat(arrivalVal, 'f', 2, 64)
-	avgInputTokensStr := strconv.FormatFloat(avgInputTokens, 'f', 2, 64)
-	avgOutputTokensStr := strconv.FormatFloat(avgOutputTokens, 'f', 2, 64)
-
-	// populate current alloc
+	// --- 4. Build Allocation ---
+	// In single-variant architecture, Allocation only contains NumReplicas.
+	// Other fields (accelerator, cost, etc.) are in the VA spec.
 	currentAlloc := llmdVariantAutoscalingV1alpha1.Allocation{
-		Accelerator: acc,
 		NumReplicas: numReplicas,
-		MaxBatch:    maxBatch,
-		VariantCost: variantCostStr,
-		TTFTAverage: ttftAverageStr,
-		ITLAverage:  itlAverageStr,
-		Load: llmdVariantAutoscalingV1alpha1.LoadProfile{
-			ArrivalRate:     arrivalRateStr,
-			AvgInputTokens:  avgInputTokensStr,
-			AvgOutputTokens: avgOutputTokensStr,
-		},
 	}
-	return currentAlloc, nil
+
+	return currentAlloc, arrivalRate, avgInputTokens, avgOutputTokens, itlAverage, ttftAverage, nil
 }
 
 // Helper to handle if a value is NaN or infinite

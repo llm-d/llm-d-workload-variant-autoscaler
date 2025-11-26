@@ -26,42 +26,34 @@ func makeValidVA() *VariantAutoscaling {
 			},
 		},
 		Spec: VariantAutoscalingSpec{
-			ModelID: "model-123",
+			ScaleTargetRef: CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       "va-sample",
+			},
+			ModelID:          "model-123",
+			VariantID:        "model-123-nvidia-1",
+			Accelerator:      "nvidia.com/mig-1g.5gb",
+			AcceleratorCount: 1,
+			VariantCost:      "10.00",
 			SLOClassRef: ConfigMapKeyRef{
 				Name: "slo-config",
 				Key:  "gold",
 			},
-			ModelProfile: ModelProfile{
-				Accelerators: []AcceleratorProfile{
-					{
-						Acc:      "nvidia.com/mig-1g.5gb",
-						AccCount: 1,
-						PerfParms: PerfParms{
-							DecodeParms:  map[string]string{"alpha": "0.8", "beta": "0.2"},
-							PrefillParms: map[string]string{"gamma": "0.8", "delta": "0.2"},
-						},
-						MaxBatchSize: 8,
-					},
+			VariantProfile: VariantProfile{
+				PerfParms: PerfParms{
+					DecodeParms:  map[string]string{"alpha": "0.8", "beta": "0.2"},
+					PrefillParms: map[string]string{"gamma": "0.8", "delta": "0.2"},
 				},
+				MaxBatchSize: 8,
 			},
 		},
 		Status: VariantAutoscalingStatus{
 			CurrentAlloc: Allocation{
-				Accelerator: "nvidia.com/mig-1g.5gb",
 				NumReplicas: 1,
-				MaxBatch:    8,
-				VariantCost: "1.23",
-				ITLAverage:  "45.6",
-				TTFTAverage: "3.2",
-				Load: LoadProfile{
-					ArrivalRate:     "12 rps",
-					AvgOutputTokens: "2.5 s",
-					AvgInputTokens:  "2.5 s",
-				},
 			},
 			DesiredOptimizedAlloc: OptimizedAlloc{
 				LastRunTime: metav1.NewTime(time.Unix(1730000000, 0).UTC()),
-				Accelerator: "nvidia.com/mig-1g.5gb",
 				NumReplicas: 2,
 			},
 			Actuation: ActuationStatus{
@@ -100,8 +92,8 @@ func TestDeepCopyIndependence(t *testing.T) {
 
 	cp.Spec.ModelID = "model-456"
 	cp.Spec.SLOClassRef.Name = "slo-config-2"
-	cp.Spec.ModelProfile.Accelerators[0].Acc = "nvidia.com/mig-3g.20gb"
-	cp.Status.CurrentAlloc.Load.ArrivalRate = "20 rps"
+	cp.Spec.VariantProfile.MaxBatchSize = 16
+	cp.Spec.Accelerator = "nvidia.com/mig-3g.20gb"
 
 	if orig.Spec.ModelID == cp.Spec.ModelID {
 		t.Errorf("DeepCopy did not create independent copy for Spec.ModelID")
@@ -109,11 +101,11 @@ func TestDeepCopyIndependence(t *testing.T) {
 	if orig.Spec.SLOClassRef.Name == cp.Spec.SLOClassRef.Name {
 		t.Errorf("DeepCopy did not create independent copy for Spec.SLOClassRef.Name")
 	}
-	if orig.Spec.ModelProfile.Accelerators[0].Acc == cp.Spec.ModelProfile.Accelerators[0].Acc {
-		t.Errorf("DeepCopy did not create independent copy for nested Accelerators slice")
+	if orig.Spec.Accelerator == cp.Spec.Accelerator {
+		t.Errorf("DeepCopy did not create independent copy for Spec.Accelerator")
 	}
-	if orig.Status.CurrentAlloc.Load.ArrivalRate == cp.Status.CurrentAlloc.Load.ArrivalRate {
-		t.Errorf("DeepCopy did not create independent copy for nested Status.Load")
+	if orig.Spec.VariantProfile.MaxBatchSize == cp.Spec.VariantProfile.MaxBatchSize {
+		t.Errorf("DeepCopy did not create independent copy for VariantProfile")
 	}
 }
 
@@ -170,15 +162,25 @@ func TestStatusOmitEmpty(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: VariantAutoscalingSpec{
-			ModelID: "m",
+			ScaleTargetRef: CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       "va-empty-status",
+			},
+			ModelID:          "m",
+			VariantID:        "m-gpu-1",
+			Accelerator:      "gpu",
+			AcceleratorCount: 1,
 			SLOClassRef: ConfigMapKeyRef{
 				Name: "slo",
 				Key:  "bronze",
 			},
-			ModelProfile: ModelProfile{
-				Accelerators: []AcceleratorProfile{
-					{Acc: "gpu", AccCount: 1, PerfParms: PerfParms{DecodeParms: map[string]string{"alpha": "1", "beta": "1"}, PrefillParms: map[string]string{"gamma": "1", "delta": "1"}}, MaxBatchSize: 1},
+			VariantProfile: VariantProfile{
+				PerfParms: PerfParms{
+					DecodeParms:  map[string]string{"alpha": "1", "beta": "1"},
+					PrefillParms: map[string]string{"gamma": "1", "delta": "1"},
 				},
+				MaxBatchSize: 1,
 			},
 		},
 	}
@@ -196,11 +198,11 @@ func TestStatusOmitEmpty(t *testing.T) {
 	var probe struct {
 		Status struct {
 			CurrentAlloc struct {
-				Accelerator string `json:"accelerator"`
+				NumReplicas int32 `json:"numReplicas"`
 			} `json:"currentAlloc"`
 			DesiredOptimizedAlloc struct {
 				LastRunTime *string `json:"lastRunTime"`
-				NumReplicas int     `json:"numReplicas"`
+				NumReplicas int32   `json:"numReplicas"`
 			} `json:"desiredOptimizedAlloc"`
 			Actuation struct {
 				Applied bool `json:"applied"`
@@ -210,7 +212,7 @@ func TestStatusOmitEmpty(t *testing.T) {
 	if err := json.Unmarshal(b, &probe); err != nil {
 		t.Fatalf("unmarshal probe failed: %v", err)
 	}
-	if probe.Status.CurrentAlloc.Accelerator != "" ||
+	if probe.Status.CurrentAlloc.NumReplicas != 0 ||
 		probe.Status.DesiredOptimizedAlloc.NumReplicas != 0 ||
 		probe.Status.Actuation.Applied != false {
 		t.Errorf("unexpected non-zero defaults in status: %+v", probe.Status)

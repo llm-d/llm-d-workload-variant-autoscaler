@@ -303,49 +303,28 @@ var _ = Describe("Collector", func() {
 				&model.Sample{Value: model.SampleValue(0.05)}, // 0.05 seconds
 			}
 
-			allocation, err := AddMetricsToOptStatus(ctx, &va, deployment, accCost, mockProm)
+			allocation, arrivalRate, avgInputTokens, avgOutputTokens, itlAverage, ttftAverage, err := AddMetricsToOptStatus(ctx, &va, deployment, accCost, mockProm)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(allocation.Accelerator).To(Equal("A100"))
-			Expect(allocation.NumReplicas).To(Equal(2))
-			Expect(allocation.MaxBatch).To(Equal(256))
-			Expect(allocation.VariantCost).To(Equal("80.00"))           // 2 replicas * 40.0 acc cost
-			Expect(allocation.TTFTAverage).To(Equal("500.00"))          // 0.5 * 1000 ms
-			Expect(allocation.ITLAverage).To(Equal("50.00"))            // 0.05 * 1000 ms
-			Expect(allocation.Load.ArrivalRate).To(Equal("10.50"))      // req per min
-			Expect(allocation.Load.AvgInputTokens).To(Equal("100.00"))  // input tokens per req
-			Expect(allocation.Load.AvgOutputTokens).To(Equal("150.00")) // output tokens per req
+			// In single-variant architecture, Allocation only has NumReplicas
+			Expect(allocation.NumReplicas).To(Equal(int32(2)))
+			// Metrics are returned as separate values
+			Expect(arrivalRate).To(BeNumerically("~", 10.5, 0.01))      // 0.175 * 60 = 10.5 req/min
+			Expect(avgInputTokens).To(BeNumerically("~", 100.0, 0.01))  // input tokens per req
+			Expect(avgOutputTokens).To(BeNumerically("~", 150.0, 0.01)) // output tokens per req
+			Expect(ttftAverage).To(BeNumerically("~", 500.0, 0.01))     // 0.5 * 1000 = 500 ms
+			Expect(itlAverage).To(BeNumerically("~", 50.0, 0.01))       // 0.05 * 1000 = 50 ms
 		})
 
-		It("should check missing accelerator label", func() {
-			// Remove accelerator label
-			delete(va.Labels, "inference.optimization/acceleratorName")
-
-			// Setup minimal mock responses
-			arrivalQuery := utils.CreateArrivalQuery(modelID, testNamespace)
-			tokenQuery := utils.CreateDecToksQuery(modelID, testNamespace)
-
-			mockProm.QueryResults[arrivalQuery] = model.Vector{
-				&model.Sample{Value: model.SampleValue(5.0)},
-			}
-			mockProm.QueryResults[tokenQuery] = model.Vector{
-				&model.Sample{Value: model.SampleValue(100.0)},
-			}
-
-			allocation, err := AddMetricsToOptStatus(ctx, &va, deployment, accCost, mockProm)
-
-			// Should fail with error due to missing accelerator label (required by CRD validation)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("missing or empty acceleratorName label"))
-			Expect(allocation).To(Equal(llmdVariantAutoscalingV1alpha1.Allocation{})) // Empty allocation on error
-		})
+		// Note: In single-variant architecture, accelerator is in spec not labels,
+		// so there's no label validation in the collector anymore.
 
 		It("should handle Prometheus Query errors", func() {
 			// Setup error for arrival Query
 			arrivalQuery := utils.CreateArrivalQuery(modelID, testNamespace)
 			mockProm.QueryErrors[arrivalQuery] = fmt.Errorf("prometheus connection failed")
 
-			allocation, err := AddMetricsToOptStatus(ctx, &va, deployment, accCost, mockProm)
+			allocation, _, _, _, _, _, err := AddMetricsToOptStatus(ctx, &va, deployment, accCost, mockProm)
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("prometheus connection failed"))
@@ -361,14 +340,16 @@ var _ = Describe("Collector", func() {
 			mockProm.QueryResults[arrivalQuery] = model.Vector{}
 			mockProm.QueryResults[tokenQuery] = model.Vector{}
 
-			allocation, err := AddMetricsToOptStatus(ctx, &va, deployment, accCost, mockProm)
+			allocation, arrivalRate, avgInputTokens, avgOutputTokens, itlAverage, ttftAverage, err := AddMetricsToOptStatus(ctx, &va, deployment, accCost, mockProm)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(allocation.ITLAverage).To(Equal("0.00"))
-			Expect(allocation.TTFTAverage).To(Equal("0.00"))
-			Expect(allocation.Load.ArrivalRate).To(Equal("0.00"))
-			Expect(allocation.Load.AvgInputTokens).To(Equal("0.00"))
-			Expect(allocation.Load.AvgOutputTokens).To(Equal("0.00"))
+			Expect(allocation.NumReplicas).To(Equal(int32(2)))
+			// Empty results should return 0 values
+			Expect(arrivalRate).To(Equal(0.0))
+			Expect(avgInputTokens).To(Equal(0.0))
+			Expect(avgOutputTokens).To(Equal(0.0))
+			Expect(itlAverage).To(Equal(0.0))
+			Expect(ttftAverage).To(Equal(0.0))
 		})
 	})
 

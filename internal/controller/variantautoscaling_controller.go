@@ -332,7 +332,7 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 			// Extract model-based targets for this model's variants
 			for _, va := range modelVAs {
 				if alloc, ok := optimizedAllocation[va.Name]; ok {
-					modelBasedTargets[va.Name] = alloc.NumReplicas
+					modelBasedTargets[va.Name] = int(alloc.NumReplicas)
 				}
 			}
 
@@ -377,7 +377,7 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 			logger.Log.Warnf("Capacity analysis unavailable, using model-based targets only: modelID=%s", modelID)
 			for _, va := range modelVAs {
 				if targetReplicas, ok := modelBasedTargets[va.Name]; ok {
-					currentReplicas := va.Status.CurrentAlloc.NumReplicas
+					currentReplicas := int(va.Status.CurrentAlloc.NumReplicas)
 
 					var action interfaces.CapacityAction
 					switch {
@@ -485,13 +485,13 @@ func (r *VariantAutoscalingReconciler) buildVariantStates(
 	for _, va := range vas {
 		// Get current replicas from deployment
 		var deploy appsv1.Deployment
-		if err := utils.GetDeploymentWithBackoff(ctx, r.Client, va.Name, va.Namespace, &deploy); err != nil {
+		if err := utils.GetDeploymentWithBackoff(ctx, r.Client, va.Spec.ScaleTargetRef.Name, va.Namespace, &deploy); err != nil {
 			logger.Log.Warnf("Failed to get deployment for VA, using status: name=%s, error=%v", va.Name, err)
 			// Fallback to status if deployment fetch fails
 			states = append(states, interfaces.VariantReplicaState{
 				VariantName:     va.Name,
-				CurrentReplicas: va.Status.CurrentAlloc.NumReplicas,
-				DesiredReplicas: va.Status.DesiredOptimizedAlloc.NumReplicas,
+				CurrentReplicas: int(va.Status.CurrentAlloc.NumReplicas),
+				DesiredReplicas: int(va.Status.DesiredOptimizedAlloc.NumReplicas),
 			})
 			continue
 		}
@@ -504,7 +504,7 @@ func (r *VariantAutoscalingReconciler) buildVariantStates(
 		states = append(states, interfaces.VariantReplicaState{
 			VariantName:     va.Name,
 			CurrentReplicas: currentReplicas,
-			DesiredReplicas: va.Status.DesiredOptimizedAlloc.NumReplicas,
+			DesiredReplicas: int(va.Status.DesiredOptimizedAlloc.NumReplicas),
 		})
 	}
 
@@ -605,7 +605,7 @@ func (r *VariantAutoscalingReconciler) runCapacityAnalysis(
 
 		// Get the deployment for this VA
 		var deploy appsv1.Deployment
-		err := utils.GetDeploymentWithBackoff(ctx, r.Client, va.Name, va.Namespace, &deploy)
+		err := utils.GetDeploymentWithBackoff(ctx, r.Client, va.Spec.ScaleTargetRef.Name, va.Namespace, &deploy)
 		if err != nil {
 			logger.Log.Debugf("Could not get deployment for VA: variant=%s, error=%v", va.Name, err)
 			continue
@@ -689,7 +689,7 @@ func (r *VariantAutoscalingReconciler) collectMetricsForCapacityMode(
 
 		// Get Deployment
 		var deploy appsv1.Deployment
-		err = utils.GetDeploymentWithBackoff(ctx, r.Client, va.Name, va.Namespace, &deploy)
+		err = utils.GetDeploymentWithBackoff(ctx, r.Client, va.Spec.ScaleTargetRef.Name, va.Namespace, &deploy)
 		if err != nil {
 			logger.Log.Debugf("Could not get deployment for VA, skipping: variant=%s, error=%v", va.Name, err)
 			continue // Skip VAs without deployments
@@ -727,7 +727,8 @@ func (r *VariantAutoscalingReconciler) collectMetricsForCapacityMode(
 		}
 
 		// Collect metrics and populate CurrentAlloc
-		currentAllocation, err := collector.AddMetricsToOptStatus(ctx, &updateVA, deploy, cost, r.PromAPI)
+		// New CRD: Allocation only contains NumReplicas; other metrics returned separately
+		currentAllocation, arrivalRate, avgInputTokens, avgOutputTokens, itlAverage, ttftAverage, err := collector.AddMetricsToOptStatus(ctx, &updateVA, deploy, cost, r.PromAPI)
 		if err != nil {
 			logger.Log.Debugf("Unable to fetch metrics for VA: variant=%s, error=%v", updateVA.Name, err)
 			continue
@@ -739,13 +740,15 @@ func (r *VariantAutoscalingReconciler) collectMetricsForCapacityMode(
 		// Update vaMap with the VA that has CurrentAlloc populated
 		vaMap[updateVA.Name] = &updateVA
 
-		logger.Log.Infof("Metrics collected for VA: variant=%s, replicas=%d, accelerator=%s, ttft=%sms, itl=%sms, cost=%s",
+		logger.Log.Infof("Metrics collected for VA: variant=%s, replicas=%d, accelerator=%s, ttft=%.2fms, itl=%.2fms, arrivalRate=%.2f, avgIn=%.0f, avgOut=%.0f",
 			updateVA.Name,
 			currentAllocation.NumReplicas,
-			currentAllocation.Accelerator,
-			currentAllocation.TTFTAverage,
-			currentAllocation.ITLAverage,
-			currentAllocation.VariantCost)
+			updateVA.Spec.Accelerator, // Accelerator now in Spec
+			ttftAverage,
+			itlAverage,
+			arrivalRate,
+			avgInputTokens,
+			avgOutputTokens)
 	}
 
 	return nil
@@ -767,8 +770,8 @@ func (r *VariantAutoscalingReconciler) applyCapacityDecisions(
 			continue
 		}
 
-		logger.Log.Debugf("Found VA in map: variant=%s, hasCurrentAlloc=%v, accelerator=%s",
-			va.Name, va.Status.CurrentAlloc.Accelerator != "", va.Status.CurrentAlloc.Accelerator)
+		logger.Log.Debugf("Found VA in map: variant=%s, accelerator=%s",
+			va.Name, va.Spec.Accelerator)
 
 		// Fetch latest version from API server to avoid conflicts
 		var updateVa llmdVariantAutoscalingV1alpha1.VariantAutoscaling
@@ -777,11 +780,11 @@ func (r *VariantAutoscalingReconciler) applyCapacityDecisions(
 			continue
 		}
 
-		// Skip status update if we don't have valid metrics (CurrentAlloc) OR valid decision (AcceleratorName)
-		// This prevents CRD validation errors when accelerator field is invalid
-		if va.Status.CurrentAlloc.Accelerator == "" || decision.AcceleratorName == "" || len(decision.AcceleratorName) < 2 {
-			logger.Log.Warnf("Skipping status update for VA without valid metrics or accelerator: variant=%s, hasCurrentAlloc=%v, decisionAccelerator=%s",
-				decision.VariantName, va.Status.CurrentAlloc.Accelerator != "", decision.AcceleratorName)
+		// Skip status update if we don't have valid accelerator in spec
+		// In new CRD, accelerator is required in Spec, so this should not happen
+		if va.Spec.Accelerator == "" {
+			logger.Log.Warnf("Skipping status update for VA without valid accelerator in spec: variant=%s",
+				decision.VariantName)
 			continue
 		}
 
@@ -789,11 +792,9 @@ func (r *VariantAutoscalingReconciler) applyCapacityDecisions(
 		updateVa.Status.CurrentAlloc = va.Status.CurrentAlloc
 
 		// Update DesiredOptimizedAlloc with capacity decision
-		acceleratorName := decision.AcceleratorName
-
+		// In new CRD, Accelerator is in Spec, not in OptimizedAlloc
 		updateVa.Status.DesiredOptimizedAlloc = llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
-			NumReplicas: decision.TargetReplicas,
-			Accelerator: acceleratorName,
+			NumReplicas: int32(decision.TargetReplicas),
 			LastRunTime: metav1.Now(),
 		}
 		updateVa.Status.Actuation.Applied = false
@@ -887,11 +888,8 @@ func (r *VariantAutoscalingReconciler) emitSafetyNetMetrics(
 			currentReplicas = int32(updateVa.Status.CurrentAlloc.NumReplicas)
 		}
 
-		// Determine accelerator - try status first, then labels, skip if unavailable
-		accelerator := updateVa.Status.DesiredOptimizedAlloc.Accelerator
-		if accelerator == "" {
-			accelerator = updateVa.Status.CurrentAlloc.Accelerator
-		}
+		// Determine accelerator from spec (single-variant architecture)
+		accelerator := updateVa.Spec.Accelerator
 		if accelerator == "" {
 			// Try to get from VA labels as last resort
 			if val, ok := updateVa.Labels["inference.optimization/acceleratorName"]; ok && val != "" {
@@ -951,11 +949,10 @@ func (r *VariantAutoscalingReconciler) prepareVariantAutoscalings(
 		}
 		logger.Log.Infof("Found SLO for model: model=%s, class=%s, slo-tpot=%d, slo-ttft=%d", modelName, className, entry.SLOTPOT, entry.SLOTTFT)
 
-		for _, modelAcceleratorProfile := range va.Spec.ModelProfile.Accelerators {
-			if utils.AddModelAcceleratorProfileToSystemData(systemData, modelName, &modelAcceleratorProfile) != nil {
-				logger.Log.Errorf("variantAutoscaling bad model accelerator profile data, skipping optimization: variantAutoscaling-name=%s", va.Name)
-				continue
-			}
+		// Add variant profile to system data (single-variant architecture)
+		if err := utils.AddModelAcceleratorProfileToSystemData(systemData, modelName, va.Spec.Accelerator, va.Spec.AcceleratorCount, &va.Spec.VariantProfile); err != nil {
+			logger.Log.Errorf("variantAutoscaling bad variant profile data, skipping optimization: variantAutoscaling-name=%s, error=%v", va.Name, err)
+			continue
 		}
 
 		accName := va.Labels["inference.optimization/acceleratorName"]
@@ -971,7 +968,7 @@ func (r *VariantAutoscalingReconciler) prepareVariantAutoscalings(
 		}
 
 		var deploy appsv1.Deployment
-		err = utils.GetDeploymentWithBackoff(ctx, r.Client, va.Name, va.Namespace, &deploy)
+		err = utils.GetDeploymentWithBackoff(ctx, r.Client, va.Spec.ScaleTargetRef.Name, va.Namespace, &deploy)
 		if err != nil {
 			logger.Log.Errorf("failed to get Deployment after retries: variantAutoscaling-name=%s, error=%v", va.Name, err)
 			continue
@@ -1025,7 +1022,7 @@ func (r *VariantAutoscalingReconciler) prepareVariantAutoscalings(
 			continue
 		}
 
-		currentAllocation, err := collector.AddMetricsToOptStatus(ctx, &updateVA, deploy, acceleratorCostValFloat, r.PromAPI)
+		currentAllocation, arrivalRate, avgInputTokens, avgOutputTokens, itlAverage, ttftAverage, err := collector.AddMetricsToOptStatus(ctx, &updateVA, deploy, acceleratorCostValFloat, r.PromAPI)
 		if err != nil {
 			logger.Log.Errorf("unable to fetch metrics, skipping this variantAutoscaling loop: error=%v", err)
 			// Don't update status here - will be updated in next reconcile when metrics are available
@@ -1033,7 +1030,7 @@ func (r *VariantAutoscalingReconciler) prepareVariantAutoscalings(
 		}
 		updateVA.Status.CurrentAlloc = currentAllocation
 
-		if err := utils.AddServerInfoToSystemData(systemData, &updateVA, className); err != nil {
+		if err := utils.AddServerInfoToSystemData(systemData, &updateVA, className, arrivalRate, avgInputTokens, avgOutputTokens, itlAverage, ttftAverage); err != nil {
 			logger.Log.Infof("variantAutoscaling bad deployment server data, skipping optimization: variantAutoscaling-name=%s", updateVA.Name)
 			continue
 		}

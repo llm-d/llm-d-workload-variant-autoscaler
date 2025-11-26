@@ -45,7 +45,8 @@ var (
 	// with the code source changes to be tested.
 	projectImage = "ghcr.io/llm-d/workload-variant-autoscaler:0.0.1-test"
 
-	MinimumReplicas = 1
+	// ExpectedMinimumReplicas is the expected minimum replica count for scale-down test scenarios.
+	ExpectedMinimumReplicas = 1
 )
 
 const (
@@ -105,13 +106,13 @@ var _ = BeforeSuite(func() {
 		}
 	}, 2*time.Minute, 1*time.Second).Should(Succeed())
 
-	// Set MinimumReplicas to 0 if WVA_SCALE_TO_ZERO is true in the ConfigMap
+	// Set ExpectedMinimumReplicas to 0 if WVA_SCALE_TO_ZERO is true in the ConfigMap
 	cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(context.Background(), "workload-variant-autoscaler-variantautoscaling-config", metav1.GetOptions{})
 	if err != nil {
 		Fail("Failed to get ConfigMap: " + err.Error())
 	}
 	if cm.Data["WVA_SCALE_TO_ZERO"] == "true" {
-		MinimumReplicas = 0
+		ExpectedMinimumReplicas = 0
 	}
 
 	if cm.Data["WVA_EXPERIMENTAL_PROACTIVE_MODEL"] == "false" {

@@ -258,13 +258,16 @@ func CreateSystemData(
 }
 
 // add model accelerator pair profile data to inferno system data
+// In single-variant architecture, accelerator and acceleratorCount are passed separately
 func AddModelAcceleratorProfileToSystemData(
 	sd *infernoConfig.SystemData,
 	modelName string,
-	modelAcceleratorProfile *llmdVariantAutoscalingV1alpha1.AcceleratorProfile) (err error) {
+	accelerator string,
+	acceleratorCount int,
+	variantProfile *llmdVariantAutoscalingV1alpha1.VariantProfile) (err error) {
 
 	// extract decode model (itl) parameters
-	decodeParms := modelAcceleratorProfile.PerfParms.DecodeParms
+	decodeParms := variantProfile.PerfParms.DecodeParms
 	if len(decodeParms) < 2 {
 		return fmt.Errorf("length of decodeParms should be 2")
 	}
@@ -278,7 +281,7 @@ func AddModelAcceleratorProfileToSystemData(
 	}
 
 	// extract prefill model (ttft) parameters
-	prefillParms := modelAcceleratorProfile.PerfParms.PrefillParms
+	prefillParms := variantProfile.PerfParms.PrefillParms
 	if len(prefillParms) < 2 {
 		return fmt.Errorf("length of prefillParms should be 2")
 	}
@@ -294,9 +297,9 @@ func AddModelAcceleratorProfileToSystemData(
 	sd.Spec.Models.PerfData = append(sd.Spec.Models.PerfData,
 		infernoConfig.ModelAcceleratorPerfData{
 			Name:         modelName,
-			Acc:          modelAcceleratorProfile.Acc,
-			AccCount:     modelAcceleratorProfile.AccCount,
-			MaxBatchSize: modelAcceleratorProfile.MaxBatchSize,
+			Acc:          accelerator,
+			AccCount:     acceleratorCount,
+			MaxBatchSize: variantProfile.MaxBatchSize,
 			DecodeParms: infernoConfig.DecodeParms{
 				Alpha: float32(alpha),
 				Beta:  float32(beta),
@@ -310,22 +313,17 @@ func AddModelAcceleratorProfileToSystemData(
 }
 
 // Add server specs to inferno system data
+// In single-variant architecture, load and performance metrics are passed as parameters
+// instead of being read from status (they will be collected from Prometheus in PR2)
 func AddServerInfoToSystemData(
 	sd *infernoConfig.SystemData,
 	va *llmdVariantAutoscalingV1alpha1.VariantAutoscaling,
-	className string) (err error) {
-
-	// server load statistics
-	var arrivalRate, avgOutputTokens, avgInputTokens, cost, itlAverage, ttftAverage float64
-	if arrivalRate, err = strconv.ParseFloat(va.Status.CurrentAlloc.Load.ArrivalRate, 32); err != nil || !CheckValue(arrivalRate) {
-		arrivalRate = 0
-	}
-	if avgOutputTokens, err = strconv.ParseFloat(va.Status.CurrentAlloc.Load.AvgOutputTokens, 32); err != nil || !CheckValue(avgOutputTokens) {
-		avgOutputTokens = 0
-	}
-	if avgInputTokens, err = strconv.ParseFloat(va.Status.CurrentAlloc.Load.AvgInputTokens, 32); err != nil || !CheckValue(avgInputTokens) {
-		avgInputTokens = 0
-	}
+	className string,
+	arrivalRate float64,
+	avgInputTokens float64,
+	avgOutputTokens float64,
+	itlAverage float64,
+	ttftAverage float64) (err error) {
 
 	serverLoadSpec := &infernoConfig.ServerLoadSpec{
 		ArrivalRate:  float32(arrivalRate),
@@ -334,20 +332,16 @@ func AddServerInfoToSystemData(
 	}
 
 	// server allocation
-	if cost, err = strconv.ParseFloat(va.Status.CurrentAlloc.VariantCost, 32); err != nil || !CheckValue(cost) {
-		cost = 0
-	}
-	if itlAverage, err = strconv.ParseFloat(va.Status.CurrentAlloc.ITLAverage, 32); err != nil || !CheckValue(itlAverage) {
-		itlAverage = 0
-	}
-	if ttftAverage, err = strconv.ParseFloat(va.Status.CurrentAlloc.TTFTAverage, 32); err != nil || !CheckValue(ttftAverage) {
-		ttftAverage = 0
+	// In single-variant architecture, variant characteristics are in spec, not status
+	var cost float64
+	if cost, err = strconv.ParseFloat(va.Spec.VariantCost, 32); err != nil || !CheckValue(cost) {
+		cost = 10.0 // default cost
 	}
 
 	AllocationData := &infernoConfig.AllocationData{
-		Accelerator: va.Status.CurrentAlloc.Accelerator,
-		NumReplicas: va.Status.CurrentAlloc.NumReplicas,
-		MaxBatch:    va.Status.CurrentAlloc.MaxBatch,
+		Accelerator: va.Spec.Accelerator,
+		NumReplicas: int(va.Status.CurrentAlloc.NumReplicas),
+		MaxBatch:    va.Spec.VariantProfile.MaxBatchSize,
 		Cost:        float32(cost),
 		ITLAverage:  float32(itlAverage),
 		TTFTAverage: float32(ttftAverage),
@@ -369,15 +363,9 @@ func AddServerInfoToSystemData(
 		DesiredAlloc:    infernoConfig.AllocationData{},
 	}
 
-	// set max batch size if configured
-	maxBatchSize := 0
-	accName := va.Labels["inference.optimization/acceleratorName"]
-	for _, ap := range va.Spec.ModelProfile.Accelerators {
-		if ap.Acc == accName {
-			maxBatchSize = ap.MaxBatchSize
-			break
-		}
-	}
+	// set max batch size from variant profile
+	// In single-variant architecture, max batch size is directly in spec
+	maxBatchSize := va.Spec.VariantProfile.MaxBatchSize
 	if maxBatchSize > 0 {
 		serverSpec.MaxBatchSize = maxBatchSize
 	}
@@ -397,11 +385,15 @@ func CreateOptimizedAlloc(name string,
 	if allocationData, exists = allocationSolution.Spec[serverName]; !exists {
 		return nil, fmt.Errorf("server %s not found", serverName)
 	}
-	logger.Log.Debug("Setting accelerator name ", "Name ", allocationData.Accelerator, "allocationData ", allocationData)
+	logger.Log.Debug("Setting allocation ", "accelerator ", allocationData.Accelerator, "replicas ", allocationData.NumReplicas)
+
+	// Get optimizer's suggested replica count
+	numReplicas := int32(allocationData.NumReplicas)
+
+	// In single-variant architecture, accelerator is in spec, not in OptimizedAlloc
 	optimizedAlloc := &llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
 		LastRunTime: metav1.NewTime(time.Now()),
-		Accelerator: allocationData.Accelerator,
-		NumReplicas: allocationData.NumReplicas,
+		NumReplicas: numReplicas,
 	}
 	return optimizedAlloc, nil
 }

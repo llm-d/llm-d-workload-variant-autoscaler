@@ -60,9 +60,29 @@ llmd:
 
 va:
   enabled: true
+  # Variant identification
+  variantID: "Qwen/Qwen3-0.6B-H100-1"
+
+  # Accelerator configuration
   accelerator: H100
+  acceleratorCount: 1
+
+  # SLO configuration (used in service class ConfigMap)
   sloTpot: 10
   sloTtft: 1000
+
+  # Variant cost (optional, defaults to "10")
+  # variantCost: "40.00"
+
+  # Performance parameters
+  maxBatchSize: 256
+  perfParms:
+    decodeParms:
+      alpha: "20.58"
+      beta: "0.41"
+    prefillParms:
+      gamma: "5.2"
+      delta: "0.1"
 
 hpa:
   enabled: true

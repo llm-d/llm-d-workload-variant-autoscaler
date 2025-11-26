@@ -28,9 +28,10 @@ func NewActuator(k8sClient client.Client) *Actuator {
 // GetCurrentDeploymentReplicas gets the real current replica count from the actual Deployment
 func (a *Actuator) GetCurrentDeploymentReplicas(ctx context.Context, va *llmdOptv1alpha1.VariantAutoscaling) (int32, error) {
 	var deploy appsv1.Deployment
-	err := utils.GetDeploymentWithBackoff(ctx, a.Client, va.Name, va.Namespace, &deploy)
+	deployName := va.Spec.ScaleTargetRef.Name
+	err := utils.GetDeploymentWithBackoff(ctx, a.Client, deployName, va.Namespace, &deploy)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get Deployment %s/%s: %w", va.Namespace, va.Name, err)
+		return 0, fmt.Errorf("failed to get Deployment %s/%s: %w", va.Namespace, deployName, err)
 	}
 
 	// Prefer status replicas (actual current state)
@@ -56,15 +57,16 @@ func (a *Actuator) EmitMetrics(ctx context.Context, VariantAutoscaling *llmdOptv
 		if err != nil {
 			logger.Log.Warn("Could not get current deployment replicas, using VariantAutoscaling status",
 				"error", err, "variant", VariantAutoscaling.Name)
-			currentReplicas = int32(VariantAutoscaling.Status.CurrentAlloc.NumReplicas) // fallback
+			currentReplicas = VariantAutoscaling.Status.CurrentAlloc.NumReplicas // fallback
 		}
 
+		// In single-variant architecture, accelerator is in spec
 		if err := a.MetricsEmitter.EmitReplicaMetrics(
 			ctx,
 			VariantAutoscaling,
 			currentReplicas, // Real current from Deployment
-			int32(VariantAutoscaling.Status.DesiredOptimizedAlloc.NumReplicas), // Inferno's optimization target
-			VariantAutoscaling.Status.DesiredOptimizedAlloc.Accelerator,
+			VariantAutoscaling.Status.DesiredOptimizedAlloc.NumReplicas, // Inferno's optimization target
+			VariantAutoscaling.Spec.Accelerator,                         // In single-variant architecture, accelerator is in spec
 		); err != nil {
 			logger.Log.Error(err, "Failed to emit optimization signals for variantAutoscaling",
 				"variantAutoscaling-name", VariantAutoscaling.Name)
@@ -76,7 +78,7 @@ func (a *Actuator) EmitMetrics(ctx context.Context, VariantAutoscaling *llmdOptv
 			VariantAutoscaling.Name,
 			VariantAutoscaling.Status.CurrentAlloc.NumReplicas,
 			VariantAutoscaling.Status.DesiredOptimizedAlloc.NumReplicas,
-			VariantAutoscaling.Status.DesiredOptimizedAlloc.Accelerator))
+			VariantAutoscaling.Spec.Accelerator))
 		return nil
 	}
 	logger.Log.Info(fmt.Sprintf("Skipping EmitReplicaMetrics for variantAutoscaling: %s - NumReplicas is 0", VariantAutoscaling.Name))
