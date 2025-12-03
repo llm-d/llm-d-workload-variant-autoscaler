@@ -37,12 +37,10 @@ jobs:
       # - name: Run precommit checks
       #   run: make precommit
       
-      # TODO: Re-enable e2e tests once they are updated and stable
-      # E2E tests are temporarily disabled. Uncomment the following to re-enable:
-      # - name: Run make test-e2e
-      #   shell: bash
-      #   run: |
-      #     make test-e2e
+      - name: Run make test-e2e
+        shell: bash
+        run: |
+          make test-e2e
       
       - name: Run make build
         shell: bash

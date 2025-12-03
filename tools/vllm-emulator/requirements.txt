@@ -1,4 +1,0 @@
-fastapi[standard]
-openai
-prometheus_client
-pydantic-settings

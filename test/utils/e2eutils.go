@@ -22,11 +22,13 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -39,8 +41,10 @@ import (
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -412,7 +416,10 @@ func GetProjectDir() (string, error) {
 	if err != nil {
 		return wd, err
 	}
-	wd = strings.ReplaceAll(wd, "/test/e2e", "")
+
+	// Handle both test packages
+	m := regexp.MustCompile(`/test/(e2e-capacity-based|e2e)`)
+	wd = m.ReplaceAllString(wd, "")
 	return wd, nil
 }
 
@@ -831,7 +838,7 @@ func ValidateVariantAutoscalingUniqueness(namespace, modelId, acc string, crClie
 }
 
 // LogVariantAutoscalingStatus fetches and logs the status of the specified VariantAutoscaling resource
-func LogVariantAutoscalingStatus(ctx context.Context, vaName, namespace string, crClient client.Client) error {
+func LogVariantAutoscalingStatus(ctx context.Context, vaName, namespace string, crClient client.Client, writer io.Writer) error {
 	variantAutoscaling := &v1alpha1.VariantAutoscaling{}
 	err := crClient.Get(ctx, client.ObjectKey{Name: vaName, Namespace: namespace}, variantAutoscaling)
 	if err != nil {
@@ -850,14 +857,14 @@ func LogVariantAutoscalingStatus(ctx context.Context, vaName, namespace string, 
 }
 
 // creates a llm-d-sim deployment with the specified configuration
-func CreateLlmdSimDeployment(namespace, deployName, modelName, appLabel, port string, avgTTFT, avgITL int) *appsv1.Deployment {
+func CreateLlmdSimDeployment(namespace, deployName, modelName, appLabel, port string, avgTTFT, avgITL int, replicas int32) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      deployName,
 			Namespace: namespace,
 		},
 		Spec: appsv1.DeploymentSpec{
-			Replicas: ptr.To(int32(1)),
+			Replicas: ptr.To(replicas),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"app":                       appLabel,
@@ -1040,6 +1047,71 @@ func CreateLlmdSimServiceMonitor(name, namespace, targetNamespace, appLabel stri
 	serviceMonitor.Object["spec"] = spec
 
 	return serviceMonitor
+}
+
+// CreateHPAOnDesiredReplicaMetrics creates a HorizontalPodAutoscaler for a deployment that scales based on the inferno_desired_replicas metric
+// Needs the Prometheus Adapter to be installed and configured in the cluster to correctly map the external metric.
+func CreateHPAOnDesiredReplicaMetrics(name, namespace, deploymentName, variantName string, maxReplicas int32) *autoscalingv2.HorizontalPodAutoscaler {
+	stabilizationWindowSeconds := int32(0)
+	podsValue := int32(10)
+	periodSeconds := int32(15)
+	targetAverageValue := resource.MustParse("1")
+
+	return &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       deploymentName,
+			},
+			MaxReplicas: maxReplicas,
+			Behavior: &autoscalingv2.HorizontalPodAutoscalerBehavior{
+				ScaleUp: &autoscalingv2.HPAScalingRules{
+					StabilizationWindowSeconds: &stabilizationWindowSeconds,
+					Policies: []autoscalingv2.HPAScalingPolicy{
+						{
+							Type:          autoscalingv2.PodsScalingPolicy,
+							Value:         podsValue,
+							PeriodSeconds: periodSeconds,
+						},
+					},
+				},
+				ScaleDown: &autoscalingv2.HPAScalingRules{
+					StabilizationWindowSeconds: &stabilizationWindowSeconds,
+					Policies: []autoscalingv2.HPAScalingPolicy{
+						{
+							Type:          autoscalingv2.PodsScalingPolicy,
+							Value:         podsValue,
+							PeriodSeconds: periodSeconds,
+						},
+					},
+				},
+			},
+			Metrics: []autoscalingv2.MetricSpec{
+				{
+					Type: autoscalingv2.ExternalMetricSourceType,
+					External: &autoscalingv2.ExternalMetricSource{
+						Metric: autoscalingv2.MetricIdentifier{
+							Name: constants.InfernoDesiredReplicas,
+							Selector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"variant_name": variantName,
+								},
+							},
+						},
+						Target: autoscalingv2.MetricTarget{
+							Type:         autoscalingv2.AverageValueMetricType,
+							AverageValue: &targetAverageValue,
+						},
+					},
+				},
+			},
+		},
+	}
 }
 
 // PrometheusQueryResult represents the response from Prometheus API
@@ -1227,13 +1299,13 @@ func SetupTestEnvironment(image string, numNodes, gpusPerNode int, gpuTypes stri
 	gom.Expect(os.Setenv("DEPLOY_LLM_D", "true")).To(gom.Succeed())
 	gom.Expect(os.Setenv("DEPLOY_WVA", "true")).To(gom.Succeed())
 	gom.Expect(os.Setenv("DEPLOY_PROMETHEUS", "true")).To(gom.Succeed())
+	gom.Expect(os.Setenv("DEPLOY_PROMETHEUS_ADAPTER", "true")).To(gom.Succeed())
 	gom.Expect(os.Setenv("E2E_TESTS_ENABLED", "true")).To(gom.Succeed())
 	gom.Expect(os.Setenv("WVA_RECONCILE_INTERVAL", "30s")).To(gom.Succeed())
 
 	// Disable components not needed to be deployed by the script
 	gom.Expect(os.Setenv("DEPLOY_LLM_D_INFERENCE_SIM", "false")).To(gom.Succeed()) // tests deploy their own llm-d-sim deployments
 	gom.Expect(os.Setenv("DEPLOY_VA", "false")).To(gom.Succeed())                  // tests create their own VariantAutoscaling resources
-	gom.Expect(os.Setenv("DEPLOY_HPA", "false")).To(gom.Succeed())                 // HPA is not needed for these tests
-	gom.Expect(os.Setenv("DEPLOY_PROMETHEUS_ADAPTER", "false")).To(gom.Succeed())  // Prometheus Adapter is not needed for these tests
+	gom.Expect(os.Setenv("DEPLOY_HPA", "false")).To(gom.Succeed())                 // tests create their own HPAs if needed
 	gom.Expect(os.Setenv("VLLM_SVC_ENABLED", "false")).To(gom.Succeed())           // tests deploy their own Service
 }

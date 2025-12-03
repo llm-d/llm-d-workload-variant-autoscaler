@@ -972,6 +972,137 @@ data:
 		})
 	})
 
+	Context("convertCapacityTargetsToDecisions", func() {
+		BeforeEach(func() {
+			logger.Log = zap.NewNop().Sugar()
+		})
+
+		It("should include ActionNoChange decisions in the result", func() {
+			By("Creating test data where target equals current replicas")
+			capacityTargets := map[string]int{
+				"variant-a": 3, // Same as current - should be ActionNoChange
+				"variant-b": 5, // Scale up
+				"variant-c": 2, // Same as current - should be ActionNoChange
+			}
+
+			capacityAnalysis := &interfaces.ModelCapacityAnalysis{
+				ModelID:   "test-model",
+				Namespace: "test-ns",
+				VariantAnalyses: []interfaces.VariantCapacityAnalysis{
+					{VariantName: "variant-a", AcceleratorName: "A100", Cost: 10.0},
+					{VariantName: "variant-b", AcceleratorName: "A100", Cost: 10.0},
+					{VariantName: "variant-c", AcceleratorName: "A100", Cost: 10.0},
+				},
+			}
+
+			variantStates := []interfaces.VariantReplicaState{
+				{VariantName: "variant-a", CurrentReplicas: 3, DesiredReplicas: 3},
+				{VariantName: "variant-b", CurrentReplicas: 3, DesiredReplicas: 3},
+				{VariantName: "variant-c", CurrentReplicas: 2, DesiredReplicas: 2},
+			}
+
+			By("Converting capacity targets to decisions")
+			decisions := convertCapacityTargetsToDecisions(capacityTargets, capacityAnalysis, variantStates)
+
+			By("Verifying all variants are included in decisions")
+			Expect(len(decisions)).To(Equal(3), "All 3 variants should have decisions including ActionNoChange")
+
+			By("Verifying ActionNoChange decisions are present")
+			decisionMap := make(map[string]interfaces.VariantDecision)
+			for _, d := range decisions {
+				decisionMap[d.VariantName] = d
+			}
+
+			// variant-a: target=3, current=3 -> ActionNoChange
+			Expect(decisionMap).To(HaveKey("variant-a"))
+			Expect(decisionMap["variant-a"].Action).To(Equal(interfaces.ActionNoChange),
+				"variant-a should have ActionNoChange (target=current=3)")
+			Expect(decisionMap["variant-a"].TargetReplicas).To(Equal(3))
+			Expect(decisionMap["variant-a"].CurrentReplicas).To(Equal(3))
+
+			// variant-b: target=5, current=3 -> ActionScaleUp
+			Expect(decisionMap).To(HaveKey("variant-b"))
+			Expect(decisionMap["variant-b"].Action).To(Equal(interfaces.ActionScaleUp),
+				"variant-b should have ActionScaleUp (target=5 > current=3)")
+			Expect(decisionMap["variant-b"].TargetReplicas).To(Equal(5))
+			Expect(decisionMap["variant-b"].CurrentReplicas).To(Equal(3))
+
+			// variant-c: target=2, current=2 -> ActionNoChange
+			Expect(decisionMap).To(HaveKey("variant-c"))
+			Expect(decisionMap["variant-c"].Action).To(Equal(interfaces.ActionNoChange),
+				"variant-c should have ActionNoChange (target=current=2)")
+			Expect(decisionMap["variant-c"].TargetReplicas).To(Equal(2))
+			Expect(decisionMap["variant-c"].CurrentReplicas).To(Equal(2))
+		})
+
+		It("should set correct fields for ActionNoChange decisions", func() {
+			By("Creating test data with only ActionNoChange scenario")
+			capacityTargets := map[string]int{
+				"stable-variant": 4,
+			}
+
+			capacityAnalysis := &interfaces.ModelCapacityAnalysis{
+				ModelID:   "stable-model",
+				Namespace: "prod-ns",
+				VariantAnalyses: []interfaces.VariantCapacityAnalysis{
+					{VariantName: "stable-variant", AcceleratorName: "H100", Cost: 20.0},
+				},
+			}
+
+			variantStates := []interfaces.VariantReplicaState{
+				{VariantName: "stable-variant", CurrentReplicas: 4, DesiredReplicas: 4},
+			}
+
+			By("Converting to decisions")
+			decisions := convertCapacityTargetsToDecisions(capacityTargets, capacityAnalysis, variantStates)
+
+			By("Verifying decision fields")
+			Expect(len(decisions)).To(Equal(1))
+			d := decisions[0]
+
+			Expect(d.VariantName).To(Equal("stable-variant"))
+			Expect(d.Namespace).To(Equal("prod-ns"))
+			Expect(d.ModelID).To(Equal("stable-model"))
+			Expect(d.Action).To(Equal(interfaces.ActionNoChange))
+			Expect(d.CurrentReplicas).To(Equal(4))
+			Expect(d.TargetReplicas).To(Equal(4))
+			Expect(d.CapacityBased).To(BeTrue())
+			Expect(d.CapacityOnly).To(BeTrue())
+			Expect(d.ModelBasedDecision).To(BeFalse())
+			Expect(d.AcceleratorName).To(Equal("H100"))
+			Expect(d.Cost).To(Equal(20.0))
+			Expect(d.Reason).To(ContainSubstring("no-change"))
+		})
+
+		It("should handle scale down decisions correctly", func() {
+			By("Creating test data with scale down scenario")
+			capacityTargets := map[string]int{
+				"overprovisioned": 2,
+			}
+
+			capacityAnalysis := &interfaces.ModelCapacityAnalysis{
+				ModelID:   "test-model",
+				Namespace: "test-ns",
+				VariantAnalyses: []interfaces.VariantCapacityAnalysis{
+					{VariantName: "overprovisioned", AcceleratorName: "A100", Cost: 10.0},
+				},
+			}
+
+			variantStates := []interfaces.VariantReplicaState{
+				{VariantName: "overprovisioned", CurrentReplicas: 5, DesiredReplicas: 5},
+			}
+
+			By("Converting to decisions")
+			decisions := convertCapacityTargetsToDecisions(capacityTargets, capacityAnalysis, variantStates)
+
+			By("Verifying scale down decision")
+			Expect(len(decisions)).To(Equal(1))
+			Expect(decisions[0].Action).To(Equal(interfaces.ActionScaleDown))
+			Expect(decisions[0].CurrentReplicas).To(Equal(5))
+			Expect(decisions[0].TargetReplicas).To(Equal(2))
+		})
+	})
+
 	Context("Capacity Config Cache", func() {
 		var (
 			ctx                  context.Context

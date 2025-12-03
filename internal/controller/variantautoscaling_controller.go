@@ -245,6 +245,7 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 		var finalDecisions []interfaces.VariantDecision
 
 		modelBasedTargets := make(map[string]int)
+		var updateList *llmdVariantAutoscalingV1alpha1.VariantAutoscalingList
 		if enableModelOptimizer {
 			// Read configs needed for model-based optimizer
 			acceleratorCm, err := r.readAcceleratorConfig(ctx, "accelerator-unit-costs", configMapNamespace)
@@ -281,7 +282,9 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 			// Create system data and run optimizer
 			systemData := utils.CreateSystemData(acceleratorCm, serviceClassCm)
-			updateList, prepareVaMap, allAnalyzerResponses, err := r.prepareVariantAutoscalings(ctx, modelVAs, acceleratorCm, serviceClassCm, systemData)
+			var prepareVaMap map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling
+			var allAnalyzerResponses map[string]*interfaces.ModelAnalyzeResponse
+			updateList, prepareVaMap, allAnalyzerResponses, err = r.prepareVariantAutoscalings(ctx, modelVAs, acceleratorCm, serviceClassCm, systemData)
 			if err != nil {
 				logger.Log.Errorf("Failed to prepare variant autoscalings: %v", err)
 				errorCount++
@@ -374,10 +377,28 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 			}
 		} else if enableModelOptimizer {
 			// MODEL-ONLY MODE: Capacity-based failed but model-based succeeded, or capacity analysis unavailable - use model-based only
+			// If prepareVariantAutoscalings failed for all VariantAutoscalings, updateList.Items will be empty
+			if updateList == nil || len(updateList.Items) == 0 {
+				logger.Log.Warnf("Model-only optimization: no VAs prepared, activating safety net: modelID=%s", modelID)
+				r.emitSafetyNetMetrics(ctx, modelVAs)
+				continue
+			}
+
 			logger.Log.Warnf("Capacity analysis unavailable, using model-based targets only: modelID=%s", modelID)
-			for _, va := range modelVAs {
+			for i := range updateList.Items {
+				va := &updateList.Items[i]
 				if targetReplicas, ok := modelBasedTargets[va.Name]; ok {
 					currentReplicas := int(va.Status.CurrentAlloc.NumReplicas)
+
+					// Get accelerator name from current allocation
+					acceleratorName := va.Status.CurrentAlloc.Accelerator
+					if acceleratorName == "" {
+						// Fallback to label if not found
+						logger.Log.Debugf("Accelerator not found in CurrentAlloc, using label: va=%s", va.Name)
+						if acceleratorName = va.Labels["inference.optimization/acceleratorName"]; acceleratorName == "" {
+							logger.Log.Warnf("Accelerator label not found, empty acceleratorName: va=%s", va.Name)
+						}
+					}
 
 					var action interfaces.CapacityAction
 					switch {
@@ -393,13 +414,17 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 						VariantName:        va.Name,
 						Namespace:          va.Namespace,
 						ModelID:            modelID,
+						AcceleratorName:    acceleratorName,
 						CurrentReplicas:    currentReplicas,
 						TargetReplicas:     targetReplicas,
 						Action:             action,
 						ModelBasedDecision: true,
 						CapacityBased:      false,
+						CapacityOnly:       false,
 						Reason:             "model-based only (capacity unavailable)",
 					})
+
+					vaMap[va.Name] = va
 				}
 			}
 		}
@@ -544,7 +569,6 @@ func convertCapacityTargetsToDecisions(
 			action = interfaces.ActionScaleDown
 		} else {
 			action = interfaces.ActionNoChange
-			continue
 		}
 
 		decision := interfaces.VariantDecision{
