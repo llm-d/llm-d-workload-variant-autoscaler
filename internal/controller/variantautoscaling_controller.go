@@ -363,18 +363,16 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 			}
 		} else if enableCapacityAnalyzer && enableModelOptimizer {
 			// HYBRID MODE: Arbitrate between capacity and model-based targets - only if capacity analysis succeeded
-			if capacityAnalysis != nil && len(capacityTargets) > 0 {
-				capacityAnalyzer := capacity.NewAnalyzer()
-				finalDecisions = capacityAnalyzer.ArbitrateWithModelBased(
-					capacityAnalysis,
-					capacityTargets,
-					modelBasedTargets,
-					variantStates,
-				)
-				logger.Log.Infof("Arbitration completed for model: %s - decision count: %d",
-					modelID,
-					len(finalDecisions))
-			}
+			capacityAnalyzer := capacity.NewAnalyzer()
+			finalDecisions = capacityAnalyzer.ArbitrateWithModelBased(
+				capacityAnalysis,
+				capacityTargets,
+				modelBasedTargets,
+				variantStates,
+			)
+			logger.Log.Infof("Arbitration completed for model: %s - decision count: %d",
+				modelID,
+				len(finalDecisions))
 		} else if enableModelOptimizer {
 			// MODEL-ONLY MODE: Capacity-based failed but model-based succeeded, or capacity analysis unavailable - use model-based only
 			// If prepareVariantAutoscalings failed for all VariantAutoscalings, updateList.Items will be empty

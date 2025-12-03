@@ -46,7 +46,7 @@ var (
 	gatewayName         = getEnvString("GATEWAY_NAME", "infra-inference-scheduling-inference-gateway")
 	modelID             = getEnvString("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
 	deployment          = getEnvString("DEPLOYMENT", "ms-inference-scheduling-llm-d-modelservice-decode")
-	requestRate         = getEnvInt("REQUEST_RATE", 20)
+	requestRate         = getEnvInt("REQUEST_RATE", 50)
 	numPrompts          = getEnvInt("NUM_PROMPTS", 3000)
 )
 
@@ -185,14 +185,19 @@ var _ = BeforeSuite(func() {
 
 	_, _ = fmt.Fprintf(GinkgoWriter, "Infrastructure verification complete\n")
 
+	// Check mode configuration
 	cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(context.Background(), "workload-variant-autoscaler-variantautoscaling-config", metav1.GetOptions{})
 	if err != nil {
 		Fail("Failed to get ConfigMap: " + err.Error())
 	}
 
-	if cm.Data["WVA_EXPERIMENTAL_PROACTIVE_MODEL"] == "false" {
-		Skip("Skipping E2E tests because WVA_EXPERIMENTAL_PROACTIVE_MODEL flag is not set in ConfigMap")
+	// Log current mode - individual test suites will decide if they should skip based on mode
+	mode := "CAPACITY-ONLY"
+	if cm.Data["WVA_EXPERIMENTAL_PROACTIVE_MODEL"] == "true" {
+		mode = "HYBRID (proactive enabled)"
 	}
+	_, _ = fmt.Fprintf(GinkgoWriter, "Controller mode: %s\n", mode)
+	_, _ = fmt.Fprintf(GinkgoWriter, "-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=\n")
 })
 
 var _ = AfterSuite(func() {
