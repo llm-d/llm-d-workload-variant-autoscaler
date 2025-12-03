@@ -1,8 +1,11 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: accelerator-unit-costs
+  name: {{ .Release.Name }}-wva-accelerator-costs
   namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: workload-variant-autoscaler
+    app.kubernetes.io/instance: {{ .Release.Name }}
 data:
   A100: |
     {

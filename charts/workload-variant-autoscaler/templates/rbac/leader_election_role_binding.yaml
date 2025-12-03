@@ -3,13 +3,14 @@ kind: RoleBinding
 metadata:
   labels:
     app.kubernetes.io/name: workload-variant-autoscaler
-  name: workload-variant-autoscaler-leader-election-rolebinding
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ .Release.Name }}-wva-leader-election-rolebinding
   namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: workload-variant-autoscaler-leader-election-role
+  name: {{ .Release.Name }}-wva-leader-election-role
 subjects:
 - kind: ServiceAccount
-  name: workload-variant-autoscaler-controller-manager
+  name: {{ .Release.Name }}-wva-controller-manager
   namespace: {{ .Release.Namespace }}

@@ -3,9 +3,10 @@ kind: ServiceMonitor
 metadata:
   labels:
     app.kubernetes.io/name: workload-variant-autoscaler
+    app.kubernetes.io/instance: {{ .Release.Name }}
     control-plane: controller-manager
     openshift.io/user-monitoring: "true"
-  name: workload-variant-autoscaler-controller-manager-metrics-monitor
+  name: {{ .Release.Name }}-wva-controller-manager-metrics-monitor
   namespace: {{ .Release.Namespace }}
 spec:
   endpoints:
@@ -14,7 +15,7 @@ spec:
       port: https
       scheme: https
       bearerTokenSecret:
-        name: workload-variant-autoscaler-controller-manager-token-manual
+        name: {{ .Release.Name }}-wva-controller-manager-token-manual
         key: token
       tlsConfig:
         # WVA metrics endpoint uses self-signed certificates, so Prometheus must skip verification

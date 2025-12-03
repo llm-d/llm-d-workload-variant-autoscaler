@@ -10,7 +10,8 @@ kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/name: workload-variant-autoscaler
-  name: workload-variant-autoscaler-variantautoscaling-editor-role
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-wva-variantautoscaling-editor-role
 rules:
 - apiGroups:
   - llmd.llm-d.ai

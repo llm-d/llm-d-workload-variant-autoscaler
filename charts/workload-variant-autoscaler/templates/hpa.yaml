@@ -2,7 +2,7 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: vllm-deployment-hpa
+  name: {{ .Release.Name }}-vllm-deployment-hpa
   namespace: {{ .Values.llmd.namespace }}
 spec:
   scaleTargetRef:

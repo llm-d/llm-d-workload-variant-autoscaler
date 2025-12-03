@@ -4,7 +4,8 @@ kind: Role
 metadata:
   labels:
     app.kubernetes.io/name: workload-variant-autoscaler
-  name: workload-variant-autoscaler-leader-election-role
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ .Release.Name }}-wva-leader-election-role
   namespace: {{ .Release.Namespace }}
 rules:
 - apiGroups:

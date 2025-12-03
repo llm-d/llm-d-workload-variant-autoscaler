@@ -2,10 +2,12 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: vllm-servicemonitor
+  name: {{ .Release.Name }}-vllm-servicemonitor
   namespace: {{ .Release.Namespace }}
   labels:
     llm-d.ai/model: {{ .Values.llmd.modelName }}
+    app.kubernetes.io/name: workload-variant-autoscaler
+    app.kubernetes.io/instance: {{ .Release.Name }}
     openshift.io/user-monitoring: "true"
 spec:
   selector:

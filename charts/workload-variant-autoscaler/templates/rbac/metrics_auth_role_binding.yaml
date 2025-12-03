@@ -1,12 +1,15 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: workload-variant-autoscaler-metrics-auth-rolebinding
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-wva-metrics-auth-rolebinding
+  labels:
+    app.kubernetes.io/name: workload-variant-autoscaler
+    app.kubernetes.io/instance: {{ .Release.Name }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: workload-variant-autoscaler-metrics-auth-role
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-wva-metrics-auth-role
 subjects:
 - kind: ServiceAccount
-  name: workload-variant-autoscaler-controller-manager
-  namespace: {{ .Release.Namespace}}
+  name: {{ .Release.Name }}-wva-controller-manager
+  namespace: {{ .Release.Namespace }}

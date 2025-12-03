@@ -1,10 +1,11 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: workload-variant-autoscaler-variantautoscaling-config
+  name: {{ .Release.Name }}-wva-config
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: workload-variant-autoscaler
+    app.kubernetes.io/instance: {{ .Release.Name }}
 data:
   # Prometheus configuration - REQUIRED: Set your Prometheus server URL
   # Examples:

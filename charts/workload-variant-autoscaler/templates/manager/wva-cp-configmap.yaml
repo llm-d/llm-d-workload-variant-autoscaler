@@ -15,8 +15,11 @@ kind: ConfigMap
 # - queueSpareTrigger: Scale-up signal if avg spare queue capacity < trigger (integer)
 #
 metadata:
-  name: capacity-scaling-config
+  name: {{ .Release.Name }}-wva-capacity-scaling
   namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: workload-variant-autoscaler
+    app.kubernetes.io/instance: {{ .Release.Name }}
 data:
   # Global defaults applied to all variants unless overridden
   default: |
