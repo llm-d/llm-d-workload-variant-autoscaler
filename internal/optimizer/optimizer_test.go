@@ -201,7 +201,7 @@ var _ = Describe("Optimizer", Ordered, func() {
 									AccCount: 1,
 									PerfParms: llmdVariantAutoscalingV1alpha1.PerfParms{
 										DecodeParms:  map[string]string{"alpha": "20.28", "beta": "0.72"},
-										PrefillParms: map[string]string{"gamma": "0", "delta": "0"},
+										PrefillParms: map[string]string{"gamma": "2.0", "delta": "0.007"},
 									},
 									MaxBatchSize: 4,
 								},

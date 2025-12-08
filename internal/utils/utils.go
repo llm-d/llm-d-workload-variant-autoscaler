@@ -277,7 +277,7 @@ func AddModelAcceleratorProfileToSystemData(
 
 	// extract decode model (itl) parameters
 	decodeParms := modelAcceleratorProfile.PerfParms.DecodeParms
-	if len(decodeParms) < 2 {
+	if len(decodeParms) != 2 {
 		return fmt.Errorf("length of decodeParms should be 2")
 	}
 
@@ -291,7 +291,7 @@ func AddModelAcceleratorProfileToSystemData(
 
 	// extract prefill model (ttft) parameters
 	prefillParms := modelAcceleratorProfile.PerfParms.PrefillParms
-	if len(prefillParms) < 2 {
+	if len(prefillParms) != 2 {
 		return fmt.Errorf("length of prefillParms should be 2")
 	}
 
@@ -409,7 +409,7 @@ func CreateOptimizedAlloc(name string,
 	if allocationData, exists = allocationSolution.Spec[serverName]; !exists {
 		return nil, fmt.Errorf("server %s not found", serverName)
 	}
-	logger.Log.Debug("Setting accelerator name ", "Name ", allocationData.Accelerator, "allocationData ", allocationData)
+	logger.Log.Debugf("Setting accelerator name: Name=%s, allocationData=%v", allocationData.Accelerator, allocationData)
 	optimizedAlloc := &llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
 		LastRunTime: metav1.NewTime(time.Now()),
 		Accelerator: allocationData.Accelerator,

@@ -33,6 +33,10 @@ wva:
     #   YOUR_CA_CERTIFICATE_HERE
     #   -----END CERTIFICATE-----
 
+  experimental:
+    enableModelTuner: false  # Enable experimental model tuner feature
+    autoGuessInitialState: false  # When true: prefer metrics-based guessing over spec parameters
+    
   # Environment variable to enable experimental hybrid-based optimization
   #  When "on", runs both capacity analyzer and model-based optimizer with arbitration
   #  When "model-only" runs model-based optimizer only
@@ -66,6 +70,7 @@ llmd:
   modelID: "Qwen/Qwen3-0.6B"
 va:
   enabled: true
+  tuned: true
   accelerator: H100
   sloTpot: 10
   sloTtft: 1000

@@ -304,7 +304,9 @@ func EffectiveConcurrency(avgServiceTime float32, serviceParms *ServiceParms, re
 // check validity of configuration parameters
 func (c *Configuration) check() error {
 	if c.MaxBatchSize <= 0 || c.MaxQueueSize < 0 || c.ServiceParms == nil ||
-		c.ServiceParms.Prefill == nil || c.ServiceParms.Decode == nil {
+		c.ServiceParms.Prefill == nil || c.ServiceParms.Decode == nil ||
+		c.ServiceParms.Decode.Alpha <= 0 || c.ServiceParms.Decode.Beta < 0 ||
+		c.ServiceParms.Prefill.Gamma <= 0 || c.ServiceParms.Prefill.Delta < 0 {
 		return fmt.Errorf("invalid configuration %s", c)
 	}
 	return nil

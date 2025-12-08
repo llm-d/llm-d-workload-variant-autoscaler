@@ -66,6 +66,10 @@ spec:
             description: Spec defines the desired state for autoscaling the model
               variant.
             properties:
+              activateModelTuner:
+                description: ActivateModelTuner indicates whether to use the experimental
+                  model tuner.
+                type: boolean
               modelID:
                 description: ModelID specifies the unique identifier of the model
                   to be autoscaled.
@@ -321,6 +325,67 @@ spec:
                 required:
                 - accelerator
                 - numReplicas
+                type: object
+              tunerPerfData:
+                description: TunerPerfData specifies the tuned prefill and decode
+                  parameters of the model used by the queue analyzer in model-based
+                  autoscaling.
+                properties:
+                  accelerator:
+                    description: Accelerator is the type of accelerator used in tuning.
+                    minLength: 1
+                    type: string
+                  covarianceMatrix:
+                    description: |-
+                      CovarianceMatrix contains the current covariance matrix of the tuned state.
+                      It represents the uncertainty in the estimate.
+                    items:
+                      items:
+                        type: string
+                      type: array
+                    maxItems: 4
+                    minItems: 4
+                    type: array
+                  model:
+                    description: Model specifies the unique identifier of the model
+                      used in tuning.
+                    minLength: 1
+                    type: string
+                  nis:
+                    description: |-
+                      Normalized Innovation Squared value of the tuner update.
+                      NIS determines how accurately Kalman filter is able to predict the measurement.
+                    pattern: ^\d+(\.\d+)?$
+                    type: string
+                  perfParms:
+                    description: PerfParms specifies the TUNED prefill and decode
+                      parameters of the queueing model.
+                    properties:
+                      decodeParms:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          DecodeParms contains parameters for the decode phase (ITL calculation)
+                          Expected keys: "alpha", "beta" for equation: itl = alpha + beta * maxBatchSize
+                        minProperties: 1
+                        type: object
+                      prefillParms:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          PrefillParms contains parameters for the prefill phase (TTFT calculation)
+                          Expected keys: "gamma", "delta" for equation: ttft = gamma + delta * tokens * maxBatchSize
+                        minProperties: 1
+                        type: object
+                    required:
+                    - decodeParms
+                    - prefillParms
+                    type: object
+                  updatedAt:
+                    description: UpdatedAt specifies the time last successful tuner
+                      update was performed.
+                    format: date-time
+                    type: string
                 type: object
             type: object
         type: object

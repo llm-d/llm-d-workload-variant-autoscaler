@@ -46,6 +46,7 @@ import (
 	analyzer "github.com/llm-d-incubation/workload-variant-autoscaler/internal/modelanalyzer"
 	variantAutoscalingOptimizer "github.com/llm-d-incubation/workload-variant-autoscaler/internal/optimizer"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/saturation"
+	tuner "github.com/llm-d-incubation/workload-variant-autoscaler/internal/tuner"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils"
 	infernoConfig "github.com/llm-d-incubation/workload-variant-autoscaler/pkg/config"
 	inferno "github.com/llm-d-incubation/workload-variant-autoscaler/pkg/core"
@@ -363,6 +364,28 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 				}
 				allDecisions = append(allDecisions, finalDecisions...)
 				continue
+			}
+
+			// Check if model tuner is enabled globally
+			tunerEnabled, err := r.isModelTunerEnabled(ctx)
+			if err != nil {
+				logger.Log.Error(err, "Failed to read model tuner configuration, defaulting to disabled")
+				tunerEnabled = false
+			}
+
+			if tunerEnabled {
+				logger.Log.Debug("Experimental model tuner is enabled globally: tuning model performance parameters for active VAs")
+
+				// Check if auto-guess initial state is enabled globally
+				autoGuessInitStateEnabled, err := r.isAutoGuessInitialStateEnabled(ctx)
+				if err != nil {
+					logger.Log.Debugf("Failed to read auto-guess configuration, defaulting to false: %v", err)
+					autoGuessInitStateEnabled = false
+				}
+				// Tune queueing model parameters for all servers using the system data and all active VAs
+				if err := tuner.TuneModelPerfParams(updateList.Items, systemData, autoGuessInitStateEnabled); err != nil {
+					logger.Log.Warn(err, "failed to tune system data")
+				}
 			}
 
 			// Run model analyzer
@@ -862,6 +885,12 @@ func (r *VariantAutoscalingReconciler) applySaturationDecisions(
 		}
 		updateVa.Status.Actuation.Applied = false
 
+		// Handle TunerPerfData based on mode
+		if !decision.SaturationOnly {
+			// Model-based optimization: update TunerPerfData
+			updateVa.Status.TunerPerfData = va.Status.TunerPerfData
+		}
+
 		// Set condition based on decision characteristics
 		if decision.SafetyOverride {
 			llmdVariantAutoscalingV1alpha1.SetCondition(&updateVa,
@@ -1093,7 +1122,7 @@ func (r *VariantAutoscalingReconciler) prepareVariantAutoscalings(
 
 		currentAllocation, err := collector.AddMetricsToOptStatus(ctx, &updateVA, deploy, acceleratorCostValFloat, r.PromAPI)
 		if err != nil {
-			logger.Log.Errorf("unable to fetch metrics, skipping this variantAutoscaling loop: error=%v", err)
+			logger.Log.Errorf("unable to fetch metrics, skipping this variantAutoscaling loop: variant=%s, error=%v", updateVA.Name, err)
 			// Don't update status here - will be updated in next reconcile when metrics are available
 			continue
 		}
@@ -1430,6 +1459,18 @@ func (r *VariantAutoscalingReconciler) readOptimizationConfig(ctx context.Contex
 	return interval, nil
 }
 
+// isModelTunerEnabled checks if the experimental model tuner feature is enabled via ConfigMap
+func (r *VariantAutoscalingReconciler) isModelTunerEnabled(ctx context.Context) (bool, error) {
+	cm := corev1.ConfigMap{}
+	err := utils.GetConfigMapWithBackoff(ctx, r.Client, configMapName, configMapNamespace, &cm)
+	if err != nil {
+		return false, fmt.Errorf("failed to get optimization configmap: %w", err)
+	}
+
+	enabled := cm.Data["EXPERIMENTAL_MODEL_TUNER_ENABLED"]
+	return strings.EqualFold(enabled, "true"), nil
+}
+
 // handleServiceMonitorEvent handles events for the controller's own ServiceMonitor.
 // When ServiceMonitor is deleted, it logs an error and emits a Kubernetes event.
 // This ensures that administrators are aware when the ServiceMonitor that enables
@@ -1475,4 +1516,16 @@ func (r *VariantAutoscalingReconciler) handleServiceMonitorEvent(ctx context.Con
 	// For create/update events, no action needed
 	// Don't trigger reconciliation - ServiceMonitor changes don't affect optimization logic
 	return nil
+}
+
+// isAutoGuessInitialStateEnabled checks if auto-guess initial state is enabled via ConfigMap
+func (r *VariantAutoscalingReconciler) isAutoGuessInitialStateEnabled(ctx context.Context) (bool, error) {
+	cm := corev1.ConfigMap{}
+	err := utils.GetConfigMapWithBackoff(ctx, r.Client, configMapName, configMapNamespace, &cm)
+	if err != nil {
+		return false, fmt.Errorf("failed to get optimization configmap: %w", err)
+	}
+
+	enabled := cm.Data["EXPERIMENTAL_AUTO_GUESS_INITIAL_STATE"]
+	return strings.EqualFold(enabled, "true"), nil
 }

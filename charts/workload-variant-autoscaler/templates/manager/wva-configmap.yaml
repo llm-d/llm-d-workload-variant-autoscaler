@@ -32,5 +32,13 @@ data:
   # Option to scale variants to zero replicas (default: false)
   WVA_SCALE_TO_ZERO: {{ .Values.wva.scaleToZero | default "false" | quote }}
 
+  # Experimental model tuner settings
+  EXPERIMENTAL_MODEL_TUNER_ENABLED: {{ .Values.wva.experimental.enableModelTuner | default "false" | quote }}
+
+  # Experimental: auto-guess initial state controls the fallback priority for parameter estimation when tuning is enabled
+  # When true: prioritize metrics-based estimation
+  # When false (default): prioritize spec parameters
+  EXPERIMENTAL_AUTO_GUESS_INITIAL_STATE: {{ .Values.wva.experimental.autoGuessInitialState | default "false" | quote }}
+  
   # Option to use experimental hybrid optimization (default: false)
   EXPERIMENTAL_HYBRID_OPTIMIZATION: {{ .Values.wva.experimentalHybridOptimization | default "off" | quote }}

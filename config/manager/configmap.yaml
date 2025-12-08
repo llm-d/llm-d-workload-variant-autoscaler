@@ -12,7 +12,7 @@ data:
   # - General: "https://prometheus:9090"
   # - OpenShift: "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
   # - KIND cluster: "https://kube-prometheus-stack-prometheus.workload-variant-autoscaler-monitoring.svc.cluster.local:9090"
-  PROMETHEUS_BASE_URL: "https://kube-prometheus-stack-prometheus.workload-variant-autoscaler-monitoring.svc.cluster.local:9090"
+  PROMETHEUS_BASE_URL: "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
   
   # TLS Configuration (TLS is always enabled for HTTPS-only support)
   # PROMETHEUS_TLS_INSECURE_SKIP_VERIFY: "true"  # Skip certificate verification (development/testing only)
@@ -31,5 +31,14 @@ data:
 
   # Option to scale variants to zero replicas (default: true)
   WVA_SCALE_TO_ZERO: "false"
+  
+  # Experimental model tuner settings
+  EXPERIMENTAL_MODEL_TUNER_ENABLED: "false"
+  
+  # Auto-guess initial state controls the fallback priority for parameter estimation when tuning is enabled
+  # When true: prioritize metrics-based estimation
+  # When false (default): prioritize spec parameters
+  EXPERIMENTAL_AUTO_GUESS_INITIAL_STATE: "false"
+  
   # Option to use experimental hybrid optimization (default: "off")
   EXPERIMENTAL_HYBRID_OPTIMIZATION: "off"

@@ -21,7 +21,11 @@ type VariantAutoscalingSpec struct {
 	// +kubebuilder:validation:Optional
 	ModelProfile ModelProfile `json:"modelProfile"`
 
-	// VariantCost specifies the cost per replica for this variant (used in saturation analysis).
+	// ActivateModelTuner indicates whether to use the experimental model tuner.
+	// +optional
+	ActivateModelTuner bool `json:"activateModelTuner,omitempty"`
+
+	// VariantCost specifies the cost per replica for this variant (used in capacity analysis).
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:Pattern=`^\d+(\.\d+)?$`
 	// +kubebuilder:default="10.0"
@@ -86,6 +90,40 @@ type VariantAutoscalingStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// TunerPerfData specifies the tuned prefill and decode parameters of the model used by the queue analyzer in model-based autoscaling.
+	// +kubebuilder:validation:Optional
+	TunerPerfData *TunerPerfData `json:"tunerPerfData,omitempty"`
+}
+
+// TunerPerfData captures data related to the status of the performance (queueing) model tuner for a variant in model-based autoscaling.
+// It is used as a persistent store of the model tuner state, keeping the model tuner stateless.
+type TunerPerfData struct {
+	// Model specifies the unique identifier of the model used in tuning.
+	// +kubebuilder:validation:MinLength=1
+	Model string `json:"model,omitempty"`
+
+	// Accelerator is the type of accelerator used in tuning.
+	// +kubebuilder:validation:MinLength=1
+	Accelerator string `json:"accelerator,omitempty"`
+
+	// UpdatedAt specifies the time last successful tuner update was performed.
+	UpdatedAt metav1.Time `json:"updatedAt,omitempty"`
+
+	// PerfParms specifies the TUNED prefill and decode parameters of the queueing model.
+	// +kubebuilder:validation:Optional
+	PerfParms PerfParms `json:"perfParms,omitempty"`
+
+	// Normalized Innovation Squared value of the tuner update.
+	// NIS determines how accurately Kalman filter is able to predict the measurement.
+	// +kubebuilder:validation:Pattern=`^\d+(\.\d+)?$`
+	NIS string `json:"nis,omitempty"`
+
+	// CovarianceMatrix contains the current covariance matrix of the tuned state.
+	// It represents the uncertainty in the estimate.
+	// +kubebuilder:validation:MinItems=4
+	// +kubebuilder:validation:MaxItems=4
+	CovarianceMatrix [][]string `json:"covarianceMatrix,omitempty"`
 }
 
 // Allocation describes the current resource allocation for a model variant.

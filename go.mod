@@ -3,10 +3,12 @@ module github.com/llm-d-incubation/workload-variant-autoscaler
 go 1.24.0
 
 require (
+	github.com/llm-inferno/kalman-filter v0.1.1
 	github.com/onsi/ginkgo/v2 v2.22.0
 	github.com/onsi/gomega v1.36.1
 	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.78.2
 	github.com/stretchr/testify v1.10.0
+	gonum.org/v1/gonum v0.16.0
 	k8s.io/apimachinery v0.32.1
 	k8s.io/client-go v0.32.1
 	sigs.k8s.io/controller-runtime v0.20.4

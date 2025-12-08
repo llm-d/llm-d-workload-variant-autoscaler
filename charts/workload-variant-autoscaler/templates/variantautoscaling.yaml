@@ -19,19 +19,13 @@ spec:
   # OpenAI API compatible name of the model
   modelID: {{ .Values.llmd.modelID | quote }}
   {{- if .Values.wva.experimentalHybridOptimization }}
+  
+  # Flag used to enable tuning for the VariantAutoscaling
+  activateModelTuner: {{ .Values.va.tuned }}
+
   # Static profiled benchmarked data for a variant running on different accelerators
   modelProfile:
     accelerators:
-      - acc: "L40S"
-        accCount: 1
-        perfParms: 
-          decodeParms:
-            alpha: "22.619"
-            beta: "0.181"
-          prefillParms:
-            gamma: "226.19"
-            delta: "0.018"
-        maxBatchSize: 512
       - acc: "H100"
         accCount: 1
         perfParms: 
@@ -56,6 +50,5 @@ spec:
             gamma: "5.2"
             delta: "0.1"
         maxBatchSize: 4
-  {{- end}} 
-   
+  {{- end}}
 {{- end }}
