@@ -307,7 +307,7 @@ https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolv
 								"--backend",
 								"openai",
 								"--base-url",
-								fmt.Sprintf("http://%s:80", gatewayName),
+								fmt.Sprintf("http://%s-istio:80", gatewayName),
 								"--dataset-name",
 								"sharegpt",
 								"--dataset-path",

@@ -40,7 +40,7 @@ var _ = Describe("Capacity Model: Scale-Up Detection", Ordered, func() {
 		initialOptimized     int32
 		scaledOptimized      int32
 		jobCompletionTimeout = 15 * time.Minute
-		testRequestRate      = 15 // Conservative rate to avoid over-saturation
+		testRequestRate      = 100 // Higher rate to trigger scale-up
 		testNumPrompts       = 3000 // Standard test duration
 	)
 
