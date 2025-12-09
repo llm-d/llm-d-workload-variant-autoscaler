@@ -1,11 +1,11 @@
 /*
-Copyright 2025.
+Copyright 2025 The llm-d Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,12 +15,9 @@ limitations under the License.
 */
 
 // Package collector provides pluggable metrics collection for the autoscaler.
-// This is part of Phase 2 of the Architecture Refactoring Epic.
-// See https://github.com/llm-d-incubation/workload-variant-autoscaler/issues/374 for the full design.
 package collector
 
 import (
-	"context"
 	"time"
 )
 
@@ -41,38 +38,6 @@ const (
 	// Includes: total, available, and allocated GPUs by type.
 	CategoryGPU MetricCategory = "gpu"
 )
-
-// SourceHealthStatus represents the health status of a metric source.
-type SourceHealthStatus string
-
-const (
-	// SourceHealthy indicates the source is responding normally.
-	SourceHealthy SourceHealthStatus = "healthy"
-
-	// SourceDegraded indicates the source is responding but with issues.
-	SourceDegraded SourceHealthStatus = "degraded"
-
-	// SourceUnhealthy indicates the source is not responding or erroring.
-	SourceUnhealthy SourceHealthStatus = "unhealthy"
-)
-
-// SourceHealth contains health information about a metric source.
-type SourceHealth struct {
-	// Status is the current health status of the source.
-	Status SourceHealthStatus
-
-	// LastCheck is the time of the last health check.
-	LastCheck time.Time
-
-	// LastSuccess is the time of the last successful query.
-	LastSuccess time.Time
-
-	// ConsecutiveFailures is the number of consecutive failed queries.
-	ConsecutiveFailures int
-
-	// Message provides additional context about the health status.
-	Message string
-}
 
 // MetricSpec defines what metric to query and how to query it.
 type MetricSpec struct {
@@ -98,29 +63,6 @@ type MetricSpec struct {
 	GroupBy []string
 }
 
-// MetricSource is the interface for pluggable metric sources.
-// Implementations include PrometheusSource, KubernetesSource, DirectScrapeSource.
-type MetricSource interface {
-	// Name returns the unique name of this source (e.g., "prometheus", "kubernetes").
-	Name() string
-
-	// SupportedCategories returns the metric categories this source can provide.
-	SupportedCategories() []MetricCategory
-
-	// Query performs a range query and returns time-series data.
-	// The returned TimeSeries contains data points between start and end.
-	Query(ctx context.Context, spec MetricSpec, start, end time.Time) (*TimeSeries, error)
-
-	// QueryInstant performs a point-in-time query and returns a single value.
-	QueryInstant(ctx context.Context, spec MetricSpec) (*MetricValue, error)
-
-	// Health returns the current health status of this source.
-	Health(ctx context.Context) SourceHealth
-
-	// Close releases any resources held by this source.
-	Close() error
-}
-
 // MetricsCacheReader provides read-only access to the metrics cache.
 // This interface is used by analyzers and the optimizer to query cached metrics.
 type MetricsCacheReader interface {
@@ -141,6 +83,7 @@ type MetricsCacheReader interface {
 	GetMetricValues(metricNames []string) map[string]map[string]float64
 
 	// IsStale returns true if the cache has not been updated within the TTL.
+	// The TTL is configured in the cache implementation (e.g., MetricsCache constructor).
 	IsStale() bool
 
 	// LastCollectionTime returns the timestamp of the last successful collection.
