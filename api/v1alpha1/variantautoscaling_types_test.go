@@ -32,9 +32,34 @@ func makeValidVA() *VariantAutoscaling {
 				Name: "va-sample-deployment",
 			},
 			ModelID: "model-123",
+			ModelProfile: ModelProfile{
+				Accelerators: []AcceleratorProfile{
+					{
+						Acc:      "nvidia.com/mig-1g.5gb",
+						AccCount: 1,
+						PerfParms: PerfParms{
+							DecodeParms:  map[string]string{"alpha": "0.8", "beta": "0.2"},
+							PrefillParms: map[string]string{"gamma": "0.8", "delta": "0.2"},
+						},
+						MaxBatchSize: 8,
+					},
+				},
+			},
 		},
 		Status: VariantAutoscalingStatus{
-			// CurrentAlloc: Allocation{...} -- Removed
+			CurrentAlloc: Allocation{
+				Accelerator: "nvidia.com/mig-1g.5gb",
+				NumReplicas: 1,
+				MaxBatch:    8,
+				VariantCost: "1.23",
+				ITLAverage:  "45.6",
+				TTFTAverage: "3.2",
+				Load: &LoadProfile{
+					ArrivalRate:     "12 rps",
+					AvgOutputTokens: "2.5 s",
+					AvgInputTokens:  "2.5 s",
+				},
+			},
 			DesiredOptimizedAlloc: OptimizedAlloc{
 				LastRunTime: metav1.NewTime(time.Unix(1730000000, 0).UTC()),
 				Accelerator: "nvidia.com/mig-1g.5gb",
@@ -75,16 +100,18 @@ func TestDeepCopyIndependence(t *testing.T) {
 	cp := orig.DeepCopy()
 
 	cp.Spec.ModelID = "model-456"
-	cp.Spec.ModelID = "model-456"
-	// cp.Status.CurrentAlloc.Load.ArrivalRate = "20 rps" -- Removed
+	cp.Spec.ModelProfile.Accelerators[0].Acc = "nvidia.com/mig-3g.20gb"
+	cp.Status.CurrentAlloc.Load.ArrivalRate = "20 rps"
 
 	if orig.Spec.ModelID == cp.Spec.ModelID {
 		t.Errorf("DeepCopy did not create independent copy for Spec.ModelID")
 	}
-
-	// if orig.Status.CurrentAlloc.Load.ArrivalRate == cp.Status.CurrentAlloc.Load.ArrivalRate {
-	// 	t.Errorf("DeepCopy did not create independent copy for nested Status.Load")
-	// }
+	if orig.Spec.ModelProfile.Accelerators[0].Acc == cp.Spec.ModelProfile.Accelerators[0].Acc {
+		t.Errorf("DeepCopy did not create independent copy for nested Accelerators slice")
+	}
+	if orig.Status.CurrentAlloc.Load.ArrivalRate == cp.Status.CurrentAlloc.Load.ArrivalRate {
+		t.Errorf("DeepCopy did not create independent copy for nested Status.Load")
+	}
 }
 
 func TestJSONRoundTrip(t *testing.T) {
@@ -145,6 +172,11 @@ func TestStatusOmitEmpty(t *testing.T) {
 				Name: "va-empty-status-deployment",
 			},
 			ModelID: "m",
+			ModelProfile: ModelProfile{
+				Accelerators: []AcceleratorProfile{
+					{Acc: "gpu", AccCount: 1, PerfParms: PerfParms{DecodeParms: map[string]string{"alpha": "1", "beta": "1"}, PrefillParms: map[string]string{"gamma": "1", "delta": "1"}}, MaxBatchSize: 1},
+				},
+			},
 		},
 	}
 
@@ -160,6 +192,9 @@ func TestStatusOmitEmpty(t *testing.T) {
 	// Optional: sanity-check a couple of zero values inside status
 	var probe struct {
 		Status struct {
+			CurrentAlloc struct {
+				Accelerator string `json:"accelerator"`
+			} `json:"currentAlloc"`
 			DesiredOptimizedAlloc struct {
 				LastRunTime *string `json:"lastRunTime"`
 				NumReplicas int     `json:"numReplicas"`
@@ -172,7 +207,8 @@ func TestStatusOmitEmpty(t *testing.T) {
 	if err := json.Unmarshal(b, &probe); err != nil {
 		t.Fatalf("unmarshal probe failed: %v", err)
 	}
-	if probe.Status.DesiredOptimizedAlloc.NumReplicas != 0 ||
+	if probe.Status.CurrentAlloc.Accelerator != "" ||
+		probe.Status.DesiredOptimizedAlloc.NumReplicas != 0 ||
 		probe.Status.Actuation.Applied != false {
 		t.Errorf("unexpected non-zero defaults in status: %+v", probe.Status)
 	}

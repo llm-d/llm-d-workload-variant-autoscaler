@@ -35,10 +35,6 @@ func BuildAllocationFromMetrics(
 			fmt.Errorf("missing or empty acceleratorName label on VariantAutoscaling object: %s", va.Name)
 	}
 
-	// Calculate variant cost
-	// VariantCost removed from Status as it is duplicated from Spec (per-replica cost)
-	// or derived (total cost).
-
 	// Max batch size - TODO: collect value from server
 	maxBatch := 256
 
@@ -58,7 +54,6 @@ func BuildAllocationFromMetrics(
 		Accelerator: acc,
 		NumReplicas: numReplicas,
 		MaxBatch:    maxBatch,
-		// VariantCost removed from Status
 		TTFTAverage: ttftAverageStr,
 		ITLAverage:  itlAverageStr,
 		Load: interfaces.LoadProfile{

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 
 	v1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
@@ -418,8 +419,7 @@ var _ = Describe("Test workload-variant-autoscaler in emulated environment - sin
 				fmt.Sprintf("High load should trigger scale-up recommendation for VA: %s - actual replicas: %d", va.Name, va.Status.DesiredOptimizedAlloc.NumReplicas))
 
 			// Verify Prometheus replica metrics
-			// Use DesiredOptimizedAlloc.Accelerator as CurrentAlloc is removed
-			currentReplicasProm, desiredReplicasProm, _, err = utils.GetInfernoReplicaMetrics(va.Name, namespace, va.Status.DesiredOptimizedAlloc.Accelerator)
+			currentReplicasProm, desiredReplicasProm, _, err = utils.GetInfernoReplicaMetrics(va.Name, namespace, va.Status.CurrentAlloc.Accelerator)
 			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to query Prometheus metrics for: %s - got error: %v", va.Name, err))
 
 			g.Expect(desiredReplicasProm).To(BeNumerically(">", 1),
@@ -427,12 +427,35 @@ var _ = Describe("Test workload-variant-autoscaler in emulated environment - sin
 			g.Expect(currentReplicasProm).To(BeNumerically(">=", 1),
 				fmt.Sprintf("Prometheus `inferno_current_replicas` query should show at least 1 replica for VA: %s - actual: %.2f", va.Name, currentReplicasProm))
 
-			// Verify that the desired number of replicas has same value as Prometheus result
+			// Verify that the current and desired number of replicas have the same value as Prometheus results
+			g.Expect(va.Status.CurrentAlloc.NumReplicas).To(BeNumerically("==", currentReplicasProm),
+				fmt.Sprintf("Current replicas %d for VA %s should be the same as Prometheus result: %.2f", va.Status.CurrentAlloc.NumReplicas, deployName, currentReplicasProm))
+
 			g.Expect(va.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically("==", desiredReplicasProm),
 				fmt.Sprintf("Desired replicas %d for VA %s should be the same as Prometheus result: %.2f", va.Status.DesiredOptimizedAlloc.NumReplicas, deployName, desiredReplicasProm))
 
-			// Note: CurrentAlloc metrics (Load, ITL, TTFT) are no longer exposed in Status, so we cannot verify them here.
-			// Internal metrics are used for decision making.
+			g.Expect(va.Status.CurrentAlloc.Load).NotTo(BeNil(), fmt.Sprintf("Load should not be nil for VA: %s", va.Name))
+			observedLoad, err := strconv.ParseFloat(va.Status.CurrentAlloc.Load.ArrivalRate, 64)
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc Load ArrivalRate to float for VA: %s", va.Name))
+
+			// Calculate expected arrival rate based on latencies and GuideLLM constant rate behavior
+			expectedArrivalRate := utils.CalculateExpectedArrivalRate(loadRate, avgTTFT, avgITL, outputTokens)
+
+			// Verify that the observed load approximately matches the expected load
+			g.Expect(observedLoad).To(BeNumerically("~", expectedArrivalRate, loadRateTolerance),
+				fmt.Sprintf("Current load arrival rate for VA %s should approximately match the expected load: %.2f - observed: %.2f", va.Name, expectedArrivalRate, observedLoad))
+
+			itlAvg, err := strconv.ParseFloat(va.Status.CurrentAlloc.ITLAverage, 64)
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc ITLAverage to float for VA: %s", va.Name))
+
+			ttftAvg, err := strconv.ParseFloat(va.Status.CurrentAlloc.TTFTAverage, 64)
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc TTFTAverage to float for VA: %s", va.Name))
+
+			g.Expect(itlAvg).To(BeNumerically(">", 0),
+				fmt.Sprintf("Current ITL Average for VA %s should be greater than 0 under load", va.Name))
+
+			g.Expect(ttftAvg).To(BeNumerically(">", 0),
+				fmt.Sprintf("Current TTFT Average for VA %s should be greater than 0 under load", va.Name))
 
 		}, 10*time.Minute, 10*time.Second).Should(Succeed())
 
@@ -455,11 +478,15 @@ var _ = Describe("Test workload-variant-autoscaler in emulated environment - sin
 			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to fetch VariantAutoscaling for: %s", deployName))
 
 			// Verify that the desired allocation remains stable with constant load
+			arrivalRateStr := "N/A"
+			if va.Status.CurrentAlloc.Load != nil {
+				arrivalRateStr = va.Status.CurrentAlloc.Load.ArrivalRate
+			}
 			g.Expect(va.Status.DesiredOptimizedAlloc.NumReplicas).To(Equal(initialDesiredReplicas),
-				fmt.Sprintf("DesiredOptimizedAlloc for VA %s should stay at %d replicas with constant load", deployName, initialDesiredReplicas))
+				fmt.Sprintf("DesiredOptimizedAlloc for VA %s should stay at %d replicas with constant load equal to %s", deployName, initialDesiredReplicas, arrivalRateStr))
 
 			// Verify Prometheus replica metrics
-			_, desiredReplicasProm, _, err = utils.GetInfernoReplicaMetrics(va.Name, namespace, va.Status.DesiredOptimizedAlloc.Accelerator)
+			_, desiredReplicasProm, _, err = utils.GetInfernoReplicaMetrics(va.Name, namespace, va.Status.CurrentAlloc.Accelerator)
 			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to query Prometheus metrics for: %s - got error: %v", va.Name, err))
 
 			// Verify that the desired number of replicas has same value as Prometheus result
@@ -470,25 +497,24 @@ var _ = Describe("Test workload-variant-autoscaler in emulated environment - sin
 			expectedArrivalRate := utils.CalculateExpectedArrivalRate(loadRate, avgTTFT, avgITL, outputTokens)
 
 			// Verify that the observed load approximately matches the expected load
-			// observedLoad, err := strconv.ParseFloat(va.Status.CurrentAlloc.Load.ArrivalRate, 64)
-			// g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc Load ArrivalRate to float for VA: %s", va.Name))
+			g.Expect(va.Status.CurrentAlloc.Load).NotTo(BeNil(), fmt.Sprintf("Load should not be nil for VA: %s", va.Name))
+			observedLoad, err := strconv.ParseFloat(va.Status.CurrentAlloc.Load.ArrivalRate, 64)
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc Load ArrivalRate to float for VA: %s", va.Name))
 
-			// g.Expect(observedLoad).To(BeNumerically("~", expectedArrivalRate, loadRateTolerance),
-			// 	fmt.Sprintf("Current load arrival rate for VA %s should approximately match the expected load: %.2f - observed: %.2f", va.Name, expectedArrivalRate, observedLoad))
+			g.Expect(observedLoad).To(BeNumerically("~", expectedArrivalRate, loadRateTolerance),
+				fmt.Sprintf("Current load arrival rate for VA %s should approximately match the expected load: %.2f - observed: %.2f", va.Name, expectedArrivalRate, observedLoad))
 
-			// itlAvg, err := strconv.ParseFloat(va.Status.CurrentAlloc.ITLAverage, 64)
-			// g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc ITLAverage to float for VA: %s", va.Name))
+			itlAvg, err := strconv.ParseFloat(va.Status.CurrentAlloc.ITLAverage, 64)
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc ITLAverage to float for VA: %s", va.Name))
 
-			_ = expectedArrivalRate // unused now
+			ttftAvg, err := strconv.ParseFloat(va.Status.CurrentAlloc.TTFTAverage, 64)
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc TTFTAverage to float for VA: %s", va.Name))
 
-			// ttftAvg, err := strconv.ParseFloat(va.Status.CurrentAlloc.TTFTAverage, 64)
-			// g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc TTFTAverage to float for VA: %s", va.Name))
+			g.Expect(itlAvg).To(BeNumerically(">", 0),
+				fmt.Sprintf("Current ITL Average for VA %s should be greater than 0 under load", va.Name))
 
-			// g.Expect(itlAvg).To(BeNumerically(">", 0),
-			// 	fmt.Sprintf("Current ITL Average for VA %s should be greater than 0 under load", va.Name))
-
-			// g.Expect(ttftAvg).To(BeNumerically(">", 0),
-			// 	fmt.Sprintf("Current TTFT Average for VA %s should be greater than 0 under load", va.Name))
+			g.Expect(ttftAvg).To(BeNumerically(">", 0),
+				fmt.Sprintf("Current TTFT Average for VA %s should be greater than 0 under load", va.Name))
 
 		}, 1*time.Minute, 10*time.Second).Should(Succeed())
 
@@ -529,15 +555,7 @@ var _ = Describe("Test workload-variant-autoscaler in emulated environment - sin
 				fmt.Sprintf("No load should trigger scale-down to %d recommendation for: %s", MinimumReplicas, va.Name))
 
 			// Verify Prometheus replica metrics
-			// Use DesiredOptimizedAlloc.Accelerator as CurrentAlloc is removed
-			// Note: Accelerator might be empty if no decision made, but here we expect scale down so a decision exists
-			accelerator := va.Status.DesiredOptimizedAlloc.Accelerator
-			if accelerator == "" {
-				// use default or skip check if critical
-				accelerator = "A100" // Fallback for test if needed, or rely on labels
-			}
-
-			_, desiredReplicasProm, _, err = utils.GetInfernoReplicaMetrics(va.Name, namespace, accelerator)
+			_, desiredReplicasProm, _, err = utils.GetInfernoReplicaMetrics(va.Name, namespace, va.Status.CurrentAlloc.Accelerator)
 			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to query Prometheus metrics for: %s - got error: %v", va.Name, err))
 
 			// Verify that the desired number of replicas has same value as Prometheus result
@@ -939,34 +957,24 @@ var _ = Describe("Test workload-variant-autoscaler in emulated environment - mul
 				fmt.Sprintf("High load should trigger scale-up recommendation for VA: %s", va1.Name))
 
 			// Verify Prometheus replica metrics
-			_, desiredReplicas1, _, err = utils.GetInfernoReplicaMetrics(va1.Name, namespace, va1.Status.DesiredOptimizedAlloc.Accelerator)
+			_, desiredReplicas1, _, err = utils.GetInfernoReplicaMetrics(va1.Name, namespace, va1.Status.CurrentAlloc.Accelerator)
 			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to query Prometheus metrics for: %s - got error: %v", va1.Name, err))
 
 			// Verify that the desired number of replicas has same value as Prometheus result
 			g.Expect(va1.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically("==", desiredReplicas1),
 				fmt.Sprintf("Current desired replicas for VA status %s should be equal to %d", va1.Name, int(desiredReplicas1)))
 
-			// itlAvg1, err := strconv.ParseFloat(va1.Status.CurrentAlloc.ITLAverage, 64)
-			// g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc ITLAverage to float for VA: %s", va1.Name))
-			// CurrentAlloc removed
+			itlAvg1, err := strconv.ParseFloat(va1.Status.CurrentAlloc.ITLAverage, 64)
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc ITLAverage to float for VA: %s", va1.Name))
 
-			ttftAvg1 := 0.0
-			// TTFTAverage from DesiredAlloc might not be populated or same, but CurrentAlloc is gone.
-			// Actually DesiredOptimizedAlloc doesn't have TTFTAverage...
-			// Wait, OptimizedAlloc has TTFTAverage? Let check types.
-			// OptimizedAlloc has Accelerator, NumReplicas, MaxBatch, LastRunTime.
-			// It does NOT have TTFT/ITL averages. Those were in Allocation.
-			// So we cannot check TTFT/ITL from Status anymore.
-			_ = ttftAvg1 // dummy
-			// g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc TTFTAverage to float for VA: %s", va1.Name))
-			// CurrentAlloc removed, skipping check
+			ttftAvg1, err := strconv.ParseFloat(va1.Status.CurrentAlloc.TTFTAverage, 64)
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc TTFTAverage to float for VA: %s", va1.Name))
 
-			// g.Expect(itlAvg1).To(BeNumerically(">", 0),
-			// 	fmt.Sprintf("Current ITL Average for VA %s should be greater than 0 under load", va1.Name))
+			g.Expect(itlAvg1).To(BeNumerically(">", 0),
+				fmt.Sprintf("Current ITL Average for VA %s should be greater than 0 under load", va1.Name))
 
-			// g.Expect(ttftAvg1).To(BeNumerically(">", 0),
-			// 	fmt.Sprintf("Current TTFT Average for VA %s should be greater than 0 under load", va1.Name))
-			_ = ttftAvg1 // unused
+			g.Expect(ttftAvg1).To(BeNumerically(">", 0),
+				fmt.Sprintf("Current TTFT Average for VA %s should be greater than 0 under load", va1.Name))
 
 			va2 := &v1alpha1.VariantAutoscaling{}
 			err = crClient.Get(ctx, client.ObjectKey{
@@ -980,31 +988,23 @@ var _ = Describe("Test workload-variant-autoscaler in emulated environment - mul
 				fmt.Sprintf("High load should trigger scale-up recommendation for VA: %s", va2.Name))
 
 			// Verify Prometheus replica metrics
-			// Use DesiredOptimizedAlloc.Accelerator or fallback
-			acc2 := va2.Status.DesiredOptimizedAlloc.Accelerator
-			if acc2 == "" {
-				acc2 = "H100"
-			} // fallback/assumed
-			_, desiredReplicas2, _, err = utils.GetInfernoReplicaMetrics(va2.Name, namespace, acc2)
+			_, desiredReplicas2, _, err = utils.GetInfernoReplicaMetrics(va2.Name, namespace, va2.Status.CurrentAlloc.Accelerator)
 			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to query Prometheus metrics for: %s - got error: %v", va2.Name, err))
 
 			// Verify that the desired number of replicas has same value as Prometheus result
 			g.Expect(va2.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically("==", desiredReplicas2),
 				fmt.Sprintf("Current desired replicas for VA status %s should be equal to %d", va2.Name, int(desiredReplicas2)))
 
-			// Remove CurrentAlloc metric checks
-			/*
-				itlAvg2, err := strconv.ParseFloat(va2.Status.CurrentAlloc.ITLAverage, 64)
-				g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc ITLAverage to float for VA: %s", va2.Name))
+			itlAvg2, err := strconv.ParseFloat(va2.Status.CurrentAlloc.ITLAverage, 64)
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc ITLAverage to float for VA: %s", va2.Name))
 
-				ttftAvg2, err := strconv.ParseFloat(va2.Status.CurrentAlloc.TTFTAverage, 64)
-				g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc TTFTAverage to float for VA: %s", va2.Name))
-				g.Expect(itlAvg2).To(BeNumerically(">", 0),
-					fmt.Sprintf("Current ITL Average for VA %s should be greater than 0 under load", va2.Name))
+			ttftAvg2, err := strconv.ParseFloat(va2.Status.CurrentAlloc.TTFTAverage, 64)
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to convert CurrentAlloc TTFTAverage to float for VA: %s", va2.Name))
+			g.Expect(itlAvg2).To(BeNumerically(">", 0),
+				fmt.Sprintf("Current ITL Average for VA %s should be greater than 0 under load", va2.Name))
 
-				g.Expect(ttftAvg2).To(BeNumerically(">", 0),
-					fmt.Sprintf("Current TTFT Average for VA %s should be greater than 0 under load", va2.Name))
-			*/
+			g.Expect(ttftAvg2).To(BeNumerically(">", 0),
+				fmt.Sprintf("Current TTFT Average for VA %s should be greater than 0 under load", va2.Name))
 		}, 10*time.Minute, 10*time.Second).Should(Succeed())
 
 		By("verifying that the controller has updated the status")
@@ -1125,7 +1125,7 @@ var _ = Describe("Test workload-variant-autoscaler in emulated environment - mul
 				fmt.Sprintf("High load should trigger scale-up recommendation for VA: %s - actual replicas: %d", firstDeployName, va1.Status.DesiredOptimizedAlloc.NumReplicas))
 
 			// Verify Prometheus replica metrics
-			_, desiredReplicas1, _, err = utils.GetInfernoReplicaMetrics(va1.Name, namespace, va1.Status.DesiredOptimizedAlloc.Accelerator)
+			_, desiredReplicas1, _, err = utils.GetInfernoReplicaMetrics(va1.Name, namespace, va1.Status.CurrentAlloc.Accelerator)
 			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to query Prometheus metrics for: %s - got error: %v", va1.Name, err))
 
 			// Verify that the desired number of replicas has same value as Prometheus result
@@ -1144,7 +1144,7 @@ var _ = Describe("Test workload-variant-autoscaler in emulated environment - mul
 				fmt.Sprintf("High load should trigger scale-up recommendation for VA: %s - actual replicas: %d", secondDeployName, va2.Status.DesiredOptimizedAlloc.NumReplicas))
 
 			// Verify Prometheus replica metrics
-			_, desiredReplicas2, _, err = utils.GetInfernoReplicaMetrics(va2.Name, namespace, va2.Status.DesiredOptimizedAlloc.Accelerator)
+			_, desiredReplicas2, _, err = utils.GetInfernoReplicaMetrics(va2.Name, namespace, va2.Status.CurrentAlloc.Accelerator)
 			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to query Prometheus metrics for: %s - got error: %v", va2.Name, err))
 
 			// Verify that the desired number of replicas has same value as Prometheus result
@@ -1194,10 +1194,10 @@ var _ = Describe("Test workload-variant-autoscaler in emulated environment - mul
 
 			// Verify that the number of replicas has scaled down to MinimumReplicas
 			g.Expect(va1.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically("==", MinimumReplicas),
-				fmt.Sprintf("No load should trigger scale-down recommendation to %d for VA: %s", MinimumReplicas, firstDeployName))
+				fmt.Sprintf("No load should trigger scale-down recommendation to %d for VA: %s - actual replicas: %d", MinimumReplicas, firstDeployName, va1.Status.CurrentAlloc.NumReplicas))
 
 			// Verify Prometheus replica metrics
-			_, desiredReplicas1, _, err = utils.GetInfernoReplicaMetrics(va1.Name, namespace, va1.Status.DesiredOptimizedAlloc.Accelerator)
+			_, desiredReplicas1, _, err = utils.GetInfernoReplicaMetrics(va1.Name, namespace, va1.Status.CurrentAlloc.Accelerator)
 			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to query Prometheus metrics for: %s - got error: %v", va1.Name, err))
 
 			// Verify that the desired number of replicas has same value as Prometheus result
@@ -1213,10 +1213,10 @@ var _ = Describe("Test workload-variant-autoscaler in emulated environment - mul
 
 			// Verify that the number of replicas has scaled down to MinimumReplicas
 			g.Expect(va2.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically("==", MinimumReplicas),
-				fmt.Sprintf("High load should trigger scale-up recommendation to %d for VA: %s - actual replicas: %d", MinimumReplicas, secondDeployName, va2.Status.DesiredOptimizedAlloc.NumReplicas))
+				fmt.Sprintf("High load should trigger scale-up recommendation to %d for VA: %s - actual replicas: %d", MinimumReplicas, secondDeployName, va2.Status.CurrentAlloc.NumReplicas))
 
 			// Verify Prometheus replica metrics
-			_, desiredReplicas2, _, err = utils.GetInfernoReplicaMetrics(va2.Name, namespace, va2.Status.DesiredOptimizedAlloc.Accelerator)
+			_, desiredReplicas2, _, err = utils.GetInfernoReplicaMetrics(va2.Name, namespace, va2.Status.CurrentAlloc.Accelerator)
 			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to query Prometheus metrics for: %s - got error: %v", va2.Name, err))
 
 			// Verify that the desired number of replicas has same value as Prometheus result
@@ -1451,6 +1451,9 @@ var _ = Describe("Test accelerator-based VA grouping isolation", Ordered, func()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(h100VA.Spec.ModelID).To(Equal(modelName))
 
+		By("verifying they have different accelerators")
+		Expect(a100VA.Spec.ModelProfile.Accelerators[0].Acc).To(Equal(a100Acc))
+		Expect(h100VA.Spec.ModelProfile.Accelerators[0].Acc).To(Equal(h100Acc))
 	})
 
 	It("should isolate scaling decisions between VAs with different accelerators", func() {

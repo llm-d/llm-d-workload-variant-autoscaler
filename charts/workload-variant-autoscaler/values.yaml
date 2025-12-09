@@ -86,6 +86,21 @@ va:
   variantCost: "10.0"
   sloTpot: 10
   sloTtft: 1000
+  # New simplified configuration fields (preferred over modelProfile):
+  # acceleratorType: "H100"     # Type of accelerator (e.g., "nvidia-a100-80gb")
+  # acceleratorCount: 1         # Number of accelerators per replica
+  # minReplicas: 0              # Minimum replicas (0 allows scale to zero)
+  # maxReplicas: 10             # Maximum replicas (optional, no limit if unset)
+  # variantCost: "10.0"         # Cost per replica for saturation analysis
+  # variantProfile:             # Simplified performance profile
+  #   maxBatchSize: 256
+  #   perfParms:
+  #     decodeParms:
+  #       alpha: "20.58"
+  #       beta: "0.41"
+  #     prefillParms:
+  #       gamma: "5.2"
+  #       delta: "0.1"
 
 hpa:
   enabled: true

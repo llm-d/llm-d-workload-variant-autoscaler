@@ -22,15 +22,45 @@ spec:
     name: {{ .Values.llmd.deploymentName | default (printf "%s-decode" .Values.llmd.modelName) }}
   # OpenAI API compatible name of the model
   modelID: {{ .Values.llmd.modelID | quote }}
+  {{- if .Values.va.acceleratorType }}
+  # Simplified accelerator configuration (preferred over modelProfile)
+  acceleratorType: {{ .Values.va.acceleratorType | quote }}
+  {{- end }}
+  {{- if .Values.va.acceleratorCount }}
+  acceleratorCount: {{ .Values.va.acceleratorCount }}
+  {{- end }}
+  {{- if .Values.va.minReplicas }}
+  # Minimum replicas for this variant (allows scale to zero if 0)
+  minReplicas: {{ .Values.va.minReplicas }}
+  {{- end }}
+  {{- if .Values.va.maxReplicas }}
+  # Maximum replicas for this variant
+  maxReplicas: {{ .Values.va.maxReplicas }}
+  {{- end }}
   # Cost per replica for this variant (used in saturation analysis)
   variantCost: {{ .Values.va.variantCost | default "10.0" | quote }}
+  {{- if .Values.va.variantProfile }}
+  # Simplified performance profile for single-accelerator deployments
+  variantProfile:
+    maxBatchSize: {{ .Values.va.variantProfile.maxBatchSize }}
+    {{- if .Values.va.variantProfile.perfParms }}
+    perfParms:
+      decodeParms:
+        alpha: {{ .Values.va.variantProfile.perfParms.decodeParms.alpha | quote }}
+        beta: {{ .Values.va.variantProfile.perfParms.decodeParms.beta | quote }}
+      prefillParms:
+        gamma: {{ .Values.va.variantProfile.perfParms.prefillParms.gamma | quote }}
+        delta: {{ .Values.va.variantProfile.perfParms.prefillParms.delta | quote }}
+    {{- end }}
+  {{- end }}
   {{- if .Values.wva.experimentalHybridOptimization }}
   # Static profiled benchmarked data for a variant running on different accelerators
+  # Deprecated: Use acceleratorType, acceleratorCount, and variantProfile instead
   modelProfile:
     accelerators:
       - acc: "L40S"
         accCount: 1
-        perfParms: 
+        perfParms:
           decodeParms:
             alpha: "22.619"
             beta: "0.181"
@@ -40,28 +70,28 @@ spec:
         maxBatchSize: 512
       - acc: "H100"
         accCount: 1
-        perfParms: 
+        perfParms:
           decodeParms:
             # Decode parameters for ITL equation: itl = alpha + beta * maxBatchSize
             alpha: "7.470"
             beta: "0.044"
-          # Prefill parameters for TTFT equation: ttft = gamma + delta * tokens * maxBatchSize  
+          # Prefill parameters for TTFT equation: ttft = gamma + delta * tokens * maxBatchSize
           prefillParms:
             gamma: "15.415"
             delta: "0.000337"
         maxBatchSize: 512
       - acc: "A100"
         accCount: 1
-        perfParms: 
+        perfParms:
           decodeParms:
             # Decode parameters for ITL equation: itl = alpha + beta * maxBatchSize
             alpha: "20.58"
             beta: "0.41"
-          # Prefill parameters for TTFT equation: ttft = gamma + delta * tokens * maxBatchSize  
+          # Prefill parameters for TTFT equation: ttft = gamma + delta * tokens * maxBatchSize
           prefillParms:
             gamma: "5.2"
             delta: "0.1"
         maxBatchSize: 4
-  {{- end}} 
-   
+  {{- end }}
+
 {{- end }}

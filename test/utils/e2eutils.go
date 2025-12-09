@@ -496,8 +496,8 @@ func startPortForwarding(service *corev1.Service, namespace string, localPort, s
 func CreateLoadGeneratorJob(namespace, targetURL, modelName string, rate, maxSeconds, inputTokens, outputTokens int, k8sClient *kubernetes.Clientset, ctx context.Context) (*batchv1.Job, error) {
 
 	// Always use a standard python image and install guidellm at runtime
-	// using python:3.11 and installing cpu-only torch (~200MB) to be lightweight and fast
-	image := "registry.access.redhat.com/ubi9/python-311:9.7"
+	// using python:3.10 and installing cpu-only torch (~200MB) to be lightweight and fast
+	image := "python:3.10"
 
 	cmd := fmt.Sprintf("echo 'Starting installation...' && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && pip install --no-cache-dir guidellm && echo 'Installation complete, starting benchmark...' && guidellm benchmark --target %s --rate-type constant --rate %d --max-seconds %d --model %s --data prompt_tokens=%d,output_tokens=%d --output-path /tmp/benchmarks.json",
 		targetURL, rate, maxSeconds, modelName, inputTokens, outputTokens)
@@ -800,19 +800,23 @@ func LogVariantAutoscalingStatus(ctx context.Context, vaName, namespace string, 
 	if err != nil {
 		return err
 	}
-	/*
-		_, err = fmt.Fprintf(writer, "Load Profile for VA: %s - Arrival Rate: %s, Avg Input Tokens: %s, Avg Output Tokens: %s, Avg ITL: %s, Avg TTFT: %s\n",
-			variantAutoscaling.Name,
-			// variantAutoscaling.Status.CurrentAlloc.Load.ArrivalRate,
-			// variantAutoscaling.Status.CurrentAlloc.Load.AvgInputTokens,
-			// variantAutoscaling.Status.CurrentAlloc.Load.AvgOutputTokens,
-			// variantAutoscaling.Status.CurrentAlloc.ITLAverage,
-			// variantAutoscaling.Status.CurrentAlloc.TTFTAverage)
-			"N/A", "N/A", "N/A", "N/A", "N/A", "N/A") // Placeholder as CurrentAlloc is removed
-		if err != nil {
-			return err
-		}
-	*/
+	// Handle nullable Load field
+	arrivalRate, avgInputTokens, avgOutputTokens := "N/A", "N/A", "N/A"
+	if variantAutoscaling.Status.CurrentAlloc.Load != nil {
+		arrivalRate = variantAutoscaling.Status.CurrentAlloc.Load.ArrivalRate
+		avgInputTokens = variantAutoscaling.Status.CurrentAlloc.Load.AvgInputTokens
+		avgOutputTokens = variantAutoscaling.Status.CurrentAlloc.Load.AvgOutputTokens
+	}
+	_, err = fmt.Fprintf(writer, "Load Profile for VA: %s - Arrival Rate: %s, Avg Input Tokens: %s, Avg Output Tokens: %s, Avg ITL: %s, Avg TTFT: %s\n",
+		variantAutoscaling.Name,
+		arrivalRate,
+		avgInputTokens,
+		avgOutputTokens,
+		variantAutoscaling.Status.CurrentAlloc.ITLAverage,
+		variantAutoscaling.Status.CurrentAlloc.TTFTAverage)
+	if err != nil {
+		return err
+	}
 
 	_, err = fmt.Fprintf(writer, "Desired Optimized Allocation for VA: %s - Replicas: %d, Accelerator: %s\n",
 		variantAutoscaling.Name,
@@ -936,6 +940,46 @@ func CreateVariantAutoscalingResource(namespace, resourceName, modelId, acc stri
 				Name: resourceName, // Use resourceName as the deployment name
 			},
 			ModelID: modelId,
+			ModelProfile: v1alpha1.ModelProfile{
+				Accelerators: []v1alpha1.AcceleratorProfile{
+					{
+						Acc:      "A100",
+						AccCount: 1,
+						PerfParms: v1alpha1.PerfParms{
+							DecodeParms:  map[string]string{"alpha": "20.58", "beta": "0.41"},
+							PrefillParms: map[string]string{"gamma": "20.58", "delta": "0.041"},
+						},
+						MaxBatchSize: 4,
+					},
+					{
+						Acc:      "H100",
+						AccCount: 1,
+						PerfParms: v1alpha1.PerfParms{
+							DecodeParms:  map[string]string{"alpha": "20.58", "beta": "0.41"},
+							PrefillParms: map[string]string{"gamma": "20.58", "delta": "0.041"},
+						},
+						MaxBatchSize: 4,
+					},
+					{
+						Acc:      "MI300X",
+						AccCount: 1,
+						PerfParms: v1alpha1.PerfParms{
+							DecodeParms:  map[string]string{"alpha": "0.77", "beta": "0.15"},
+							PrefillParms: map[string]string{"gamma": "0.77", "delta": "0.15"},
+						},
+						MaxBatchSize: 4,
+					},
+					{
+						Acc:      "G2",
+						AccCount: 1,
+						PerfParms: v1alpha1.PerfParms{
+							DecodeParms:  map[string]string{"alpha": "17.15", "beta": "0.34"},
+							PrefillParms: map[string]string{"gamma": "17.15", "delta": "0.34"},
+						},
+						MaxBatchSize: 4,
+					},
+				},
+			},
 		},
 	}
 }
@@ -1204,95 +1248,6 @@ func GetInfernoReplicaMetrics(variantName, namespace, acceleratorType string) (c
 	}
 
 	return currentReplicas, desiredReplicas, desiredRatio, nil
-}
-
-// DefaultPrometheusURL is the default Prometheus endpoint for E2E tests.
-// Environment variables:
-//   - PROMETHEUS_URL: Override the Prometheus endpoint (default: https://localhost:9090)
-//   - PROMETHEUS_SKIP_TLS_VERIFY: Set to "false" to enable TLS cert verification (default: true)
-const DefaultPrometheusURL = "https://localhost:9090"
-
-// DefaultPrometheusQueryTimeout is the default timeout for Prometheus queries.
-// This can be adjusted for environments with slower network or larger result sets.
-const DefaultPrometheusQueryTimeout = 30 * time.Second
-
-// namespaceRegex validates Kubernetes namespace names (RFC 1123 DNS label)
-var namespaceRegex = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-
-// validateNamespace checks if a namespace name is valid to prevent PromQL injection.
-func validateNamespace(namespace string) error {
-	if namespace == "" {
-		return fmt.Errorf("namespace cannot be empty")
-	}
-	if len(namespace) > 63 {
-		return fmt.Errorf("namespace too long: %d characters (max 63)", len(namespace))
-	}
-	if !namespaceRegex.MatchString(namespace) {
-		return fmt.Errorf("invalid namespace name: must be lowercase alphanumeric with optional dashes")
-	}
-	return nil
-}
-
-// GetQueueMetrics queries Prometheus for vLLM queue length metrics for pods in a namespace.
-// Returns a map of pod name to queue length, and total queue length across all pods.
-func GetQueueMetrics(namespace string) (podQueues map[string]float64, totalQueue float64, err error) {
-	// Validate namespace to prevent PromQL injection
-	if err := validateNamespace(namespace); err != nil {
-		return nil, 0, fmt.Errorf("invalid namespace: %w", err)
-	}
-
-	prometheusURL := os.Getenv("PROMETHEUS_URL")
-	if prometheusURL == "" {
-		prometheusURL = DefaultPrometheusURL
-	}
-
-	// Allow TLS verification to be configured via environment variable.
-	// WARNING: insecureSkipVerify=true disables TLS certificate verification and is intended
-	// only for E2E tests with self-signed certificates. Do not use in production.
-	// Set PROMETHEUS_SKIP_TLS_VERIFY=false to enable certificate verification.
-	insecureSkipVerify := true // Default for E2E tests with self-signed certs
-	if skipVerify := os.Getenv("PROMETHEUS_SKIP_TLS_VERIFY"); skipVerify != "" {
-		insecureSkipVerify = strings.EqualFold(skipVerify, "true")
-	}
-
-	client, err := NewPrometheusClient(prometheusURL, insecureSkipVerify)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create prometheus client: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultPrometheusQueryTimeout)
-	defer cancel()
-
-	// Query queue length per pod
-	// Note: PromQL doesn't support parameterized queries. This is safe because:
-	// 1. constants.VLLMNumRequestsWaiting is a compile-time constant we control
-	// 2. namespace is validated above against RFC 1123 DNS label format (alphanumeric + dashes only)
-	query := fmt.Sprintf(`%s{namespace="%s"}`, constants.VLLMNumRequestsWaiting, namespace)
-
-	result, warnings, err := client.client.Query(ctx, query, time.Now())
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to query queue metrics: %w", err)
-	}
-	if len(warnings) > 0 {
-		fmt.Printf("Prometheus warnings: %v\n", warnings)
-	}
-
-	podQueues = make(map[string]float64)
-
-	if result.Type() == model.ValVector {
-		vector, ok := result.(model.Vector)
-		if !ok {
-			return nil, 0, fmt.Errorf("unexpected Prometheus result type: %T", result)
-		}
-		for _, sample := range vector {
-			podName := string(sample.Metric["pod"])
-			queueLen := float64(sample.Value)
-			podQueues[podName] = queueLen
-			totalQueue += queueLen
-		}
-	}
-
-	return podQueues, totalQueue, nil
 }
 
 // setupEnvironment sets up necessary environment variables for the E2E tests

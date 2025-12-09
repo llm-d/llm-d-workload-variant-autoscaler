@@ -78,8 +78,6 @@ const (
 	// Second variant with different accelerator (for cost-based testing)
 	h100Cost = 50.0
 	a100Cost = 30.0
-
-	prometheusLocalPort = 19090
 )
 
 var (
@@ -261,7 +259,7 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Single Va
 
 	Context("Before load - initial replica count", func() {
 		It("should have correct initial replica count before applying load", func() {
-			By("waiting for DesiredOptimizedAlloc to be populated")
+			By("waiting for CurrentAlloc to be populated")
 			Eventually(func(g Gomega) {
 				va := &v1alpha1.VariantAutoscaling{}
 				err := crClient.Get(ctx, client.ObjectKey{
@@ -270,11 +268,10 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Single Va
 				}, va)
 				g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to fetch VariantAutoscaling for: %s", deployName))
 
-				// Wait for DesiredOptimizedAlloc to be populated (ensures reconciliation loop is active)
-				g.Expect(va.Status.DesiredOptimizedAlloc.Accelerator).NotTo(BeEmpty(),
-					"DesiredOptimizedAlloc should be populated with accelerator info")
-				g.Expect(va.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically(">=", 0),
-					"DesiredOptimizedAlloc should have NumReplicas set")
+				g.Expect(va.Status.CurrentAlloc.Accelerator).NotTo(BeEmpty(),
+					"CurrentAlloc should be populated with accelerator info")
+				g.Expect(va.Status.CurrentAlloc.NumReplicas).To(BeNumerically(">=", 0),
+					"CurrentAlloc should have NumReplicas set")
 			}, 10*time.Minute, 10*time.Second).Should(Succeed())
 
 			By("querying external metrics API")
@@ -298,8 +295,7 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Single Va
 				g.Expect(err).NotTo(HaveOccurred())
 
 				// Initial replica count should be MinimumReplicas (0 or 1)
-				// Initial replica count should be MinimumReplicas (0 or 1)
-				g.Expect(va.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically("==", MinimumReplicas),
+				g.Expect(va.Status.CurrentAlloc.NumReplicas).To(BeNumerically("==", MinimumReplicas),
 					fmt.Sprintf("VariantAutoscaling should be at %d replicas", MinimumReplicas))
 			}, 10*time.Minute, 5*time.Second).Should(Succeed())
 
@@ -313,14 +309,14 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Single Va
 		It("should scale up when saturation is detected", func() {
 			// Set up port-forwarding for Prometheus
 			By("setting up port-forward to Prometheus service")
-			prometheusPortForwardCmd := utils.SetUpPortForward(k8sClient, ctx, "kube-prometheus-stack-prometheus", controllerMonitoringNamespace, prometheusLocalPort, 9090)
+			prometheusPortForwardCmd := utils.SetUpPortForward(k8sClient, ctx, "kube-prometheus-stack-prometheus", controllerMonitoringNamespace, 9090, 9090)
 			defer func() {
 				err := utils.StopCmd(prometheusPortForwardCmd)
 				Expect(err).NotTo(HaveOccurred(), "Should be able to stop Prometheus port-forwarding")
 			}()
 
 			By("waiting for Prometheus port-forward to be ready")
-			err := utils.VerifyPortForwardReadiness(ctx, prometheusLocalPort, fmt.Sprintf("https://localhost:%d/api/v1/query?query=up", prometheusLocalPort))
+			err := utils.VerifyPortForwardReadiness(ctx, 9090, fmt.Sprintf("https://localhost:%d/api/v1/query?query=up", 9090))
 			Expect(err).NotTo(HaveOccurred(), "Prometheus port-forward should be ready within timeout")
 
 			By("starting load generation to trigger saturation")
@@ -669,12 +665,10 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 				g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to fetch VariantAutoscaling for: %s", deployNameA100))
 
 				// In saturation mode, wait for CurrentAlloc to be populated (no MetricsAvailable condition)
-				// In saturation mode, wait for CurrentAlloc to be populated (no MetricsAvailable condition)
-				// CurrentAlloc removed
-				// g.Expect(vaA100.Status.CurrentAlloc.Accelerator).NotTo(BeEmpty(),
-				// 	"CurrentAlloc should be populated with accelerator info")
-				// g.Expect(vaA100.Status.CurrentAlloc.NumReplicas).To(BeNumerically(">=", 0),
-				// 	"CurrentAlloc should have NumReplicas set")
+				g.Expect(vaA100.Status.CurrentAlloc.Accelerator).NotTo(BeEmpty(),
+					"CurrentAlloc should be populated with accelerator info")
+				g.Expect(vaA100.Status.CurrentAlloc.NumReplicas).To(BeNumerically(">=", 0),
+					"CurrentAlloc should have NumReplicas set")
 			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
 			Eventually(func(g Gomega) {
@@ -686,11 +680,10 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 				g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to fetch VariantAutoscaling for: %s", deployNameH100))
 
 				// In saturation mode, wait for CurrentAlloc to be populated (no MetricsAvailable condition)
-				// CurrentAlloc removed
-				// g.Expect(vaH100.Status.CurrentAlloc.Accelerator).NotTo(BeEmpty(),
-				// 	"CurrentAlloc should be populated with accelerator info")
-				// g.Expect(vaH100.Status.CurrentAlloc.NumReplicas).To(BeNumerically(">=", 0),
-				// 	"CurrentAlloc should have NumReplicas set")
+				g.Expect(vaH100.Status.CurrentAlloc.Accelerator).NotTo(BeEmpty(),
+					"CurrentAlloc should be populated with accelerator info")
+				g.Expect(vaH100.Status.CurrentAlloc.NumReplicas).To(BeNumerically(">=", 0),
+					"CurrentAlloc should have NumReplicas set")
 			}, 10*time.Minute, 10*time.Second).Should(Succeed())
 
 			By("verifying A100 variant has expected initial replicas or scales down (before load)")
@@ -703,8 +696,7 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 				g.Expect(err).NotTo(HaveOccurred())
 
 				// Initial replica count should be MinimumReplicas (typically 0 or 1)
-				// Initial replica count should be MinimumReplicas (typically 0 or 1)
-				g.Expect(vaA100.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically("==", MinimumReplicas),
+				g.Expect(vaA100.Status.CurrentAlloc.NumReplicas).To(BeNumerically("==", MinimumReplicas),
 					fmt.Sprintf("A100 VariantAutoscaling DesiredReplicas should be at %d replicas", MinimumReplicas))
 			}, 10*time.Minute, 5*time.Second).Should(Succeed())
 
@@ -717,7 +709,7 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 				}, vaH100)
 				g.Expect(err).NotTo(HaveOccurred())
 
-				g.Expect(vaH100.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically("==", MinimumReplicas),
+				g.Expect(vaH100.Status.CurrentAlloc.NumReplicas).To(BeNumerically("==", MinimumReplicas),
 					fmt.Sprintf("H100 VariantAutoscaling DesiredReplicas should be at %d replicas", MinimumReplicas))
 			}, 10*time.Minute, 5*time.Second).Should(Succeed())
 
@@ -733,14 +725,14 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 		It("should scale up when saturation is detected", func() {
 			// Set up port-forwarding for Prometheus
 			By("setting up port-forward to Prometheus service")
-			prometheusPortForwardCmd := utils.SetUpPortForward(k8sClient, ctx, "kube-prometheus-stack-prometheus", controllerMonitoringNamespace, prometheusLocalPort, 9090)
+			prometheusPortForwardCmd := utils.SetUpPortForward(k8sClient, ctx, "kube-prometheus-stack-prometheus", controllerMonitoringNamespace, 9090, 9090)
 			defer func() {
 				err := utils.StopCmd(prometheusPortForwardCmd)
 				Expect(err).NotTo(HaveOccurred(), "Should be able to stop Prometheus port-forwarding")
 			}()
 
 			By("waiting for Prometheus port-forward to be ready")
-			err := utils.VerifyPortForwardReadiness(ctx, prometheusLocalPort, fmt.Sprintf("https://localhost:%d/api/v1/query?query=up", prometheusLocalPort))
+			err := utils.VerifyPortForwardReadiness(ctx, 9090, fmt.Sprintf("https://localhost:%d/api/v1/query?query=up", 9090))
 			Expect(err).NotTo(HaveOccurred(), "Prometheus port-forward should be ready within timeout")
 
 			By("starting load generation to trigger saturation")
@@ -808,16 +800,17 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 						vaH100.Status.DesiredOptimizedAlloc.NumReplicas))
 
 				// Verify metrics are being collected
-				// Verify metrics are being collected
-				// arrivalRateA100, err := strconv.ParseFloat(vaA100.Status.CurrentAlloc.Load.ArrivalRate, 64)
-				// g.Expect(err).NotTo(HaveOccurred(), "Should parse A100 arrival rate")
+				g.Expect(vaA100.Status.CurrentAlloc.Load).NotTo(BeNil(), "A100 Load should not be nil")
+				arrivalRateA100, err := strconv.ParseFloat(vaA100.Status.CurrentAlloc.Load.ArrivalRate, 64)
+				g.Expect(err).NotTo(HaveOccurred(), "Should parse A100 arrival rate")
 
-				// arrivalRateH100, err := strconv.ParseFloat(vaH100.Status.CurrentAlloc.Load.ArrivalRate, 64)
-				// g.Expect(err).NotTo(HaveOccurred(), "Should parse H100 arrival rate")
+				g.Expect(vaH100.Status.CurrentAlloc.Load).NotTo(BeNil(), "H100 Load should not be nil")
+				arrivalRateH100, err := strconv.ParseFloat(vaH100.Status.CurrentAlloc.Load.ArrivalRate, 64)
+				g.Expect(err).NotTo(HaveOccurred(), "Should parse H100 arrival rate")
 
-				// totalArrivalRate := arrivalRateA100 + arrivalRateH100
-				// g.Expect(totalArrivalRate).To(BeNumerically(">", 0),
-				// 	"Total arrival rate should be positive under load")
+				totalArrivalRate := arrivalRateA100 + arrivalRateH100
+				g.Expect(totalArrivalRate).To(BeNumerically(">", 0),
+					"Total arrival rate should be positive under load")
 
 			}, 10*time.Minute, 10*time.Second).Should(Succeed())
 
@@ -831,8 +824,7 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 
 	Context("Replica stability under constant load", func() {
 		//TODO: Flaky - re-enable when controller is stable
-		It("should maintain stable replica count under constant load", func() {
-			Skip("Flaky - re-enable when controller is stable")
+		PIt("should maintain stable replica count under constant load", func() {
 			By("starting constant load generation")
 			loadGenJob, err := utils.CreateLoadGeneratorJob(
 
@@ -967,10 +959,10 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 					"Total replicas should increase under high load")
 
 				// Verify cost information is available
-				a100Cost, err := strconv.ParseFloat(vaA100.Spec.VariantCost, 64)
+				a100Cost, err := strconv.ParseFloat(vaA100.Status.CurrentAlloc.VariantCost, 64)
 				g.Expect(err).NotTo(HaveOccurred(), "A100 cost should be parseable")
 
-				h100Cost, err := strconv.ParseFloat(vaH100.Spec.VariantCost, 64)
+				h100Cost, err := strconv.ParseFloat(vaH100.Status.CurrentAlloc.VariantCost, 64)
 				g.Expect(err).NotTo(HaveOccurred(), "H100 cost should be parseable")
 
 				// In Saturation-based mode with cost-awareness, cheaper variant should get more replicas
@@ -1046,87 +1038,5 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 		Expect(client.IgnoreNotFound(err)).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to delete Deployment: %s", deployNameH100))
 
 		_, _ = fmt.Fprintf(GinkgoWriter, "Cleanup completed for multiple VAs Saturation-based E2E tests\n")
-	})
-})
-
-var _ = Describe("VariantAutoscaling Target Condition", Ordered, func() {
-	var (
-		namespace   string
-		validCtx    context.Context
-		invalidCtx  context.Context
-		modelName   string
-		variantCost float64
-	)
-
-	BeforeAll(func() {
-		if os.Getenv("KUBECONFIG") == "" {
-			Skip("KUBECONFIG is not set; skipping e2e test")
-		}
-
-		initializeK8sClient()
-
-		namespace = "default" // Use default namespace for simplicity
-		modelName = "target-condition-model"
-		variantCost = 10.0
-		validCtx = context.Background()
-		invalidCtx = context.Background()
-	})
-
-	It("should set TargetResolved=True when target deployment exists", func() {
-		name := "valid-target-va"
-		deployName := name
-		appLabel := name
-		port := 8000
-
-		By("creating deployment")
-		deployment := utils.CreateLlmdSimDeployment(namespace, deployName, modelName, appLabel, fmt.Sprintf("%d", port), 200, 20, 1)
-		_, err := k8sClient.AppsV1().Deployments(namespace).Create(validCtx, deployment, metav1.CreateOptions{})
-		Expect(err).NotTo(HaveOccurred())
-
-		By("creating VariantAutoscaling")
-		va := utils.CreateVariantAutoscalingResource(namespace, deployName, modelName, "A100", variantCost)
-		err = crClient.Create(validCtx, va)
-		Expect(err).NotTo(HaveOccurred())
-
-		By("waiting for TargetResolved=True")
-		Eventually(func() {
-			fetchedVA := &v1alpha1.VariantAutoscaling{}
-			err := crClient.Get(validCtx, client.ObjectKey{Namespace: namespace, Name: deployName}, fetchedVA)
-			Expect(err).NotTo(HaveOccurred())
-
-			condition := v1alpha1.GetCondition(fetchedVA, v1alpha1.TypeTargetResolved)
-			Expect(condition).NotTo(BeNil())
-			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condition.Reason).To(Equal(v1alpha1.ReasonTargetFound))
-		}, 1*time.Minute, 1*time.Second).Should(Succeed())
-
-		// Cleanup
-		_ = crClient.Delete(validCtx, va)
-		_ = k8sClient.AppsV1().Deployments(namespace).Delete(validCtx, deployName, metav1.DeleteOptions{})
-	})
-
-	It("should set TargetResolved=False when target deployment does not exist", func() {
-		name := "invalid-target-va"
-		// No deployment created
-
-		By("creating VariantAutoscaling")
-		va := utils.CreateVariantAutoscalingResource(namespace, name, modelName, "A100", variantCost)
-		err := crClient.Create(invalidCtx, va)
-		Expect(err).NotTo(HaveOccurred())
-
-		By("waiting for TargetResolved=False")
-		Eventually(func() {
-			fetchedVA := &v1alpha1.VariantAutoscaling{}
-			err := crClient.Get(invalidCtx, client.ObjectKey{Namespace: namespace, Name: name}, fetchedVA)
-			Expect(err).NotTo(HaveOccurred())
-
-			condition := v1alpha1.GetCondition(fetchedVA, v1alpha1.TypeTargetResolved)
-			Expect(condition).NotTo(BeNil())
-			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
-			Expect(condition.Reason).To(Equal(v1alpha1.ReasonTargetNotFound))
-		}, 1*time.Minute, 1*time.Second).Should(Succeed())
-
-		// Cleanup
-		_ = crClient.Delete(invalidCtx, va)
 	})
 })

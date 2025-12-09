@@ -23,6 +23,12 @@ spec:
     - jsonPath: .spec.modelID
       name: Model
       type: string
+    - jsonPath: .status.currentAlloc.accelerator
+      name: Accelerator
+      type: string
+    - jsonPath: .status.currentAlloc.numReplicas
+      name: CurrentReplicas
+      type: integer
     - jsonPath: .status.desiredOptimizedAlloc.numReplicas
       name: Optimized
       type: string
@@ -60,11 +66,96 @@ spec:
             description: Spec defines the desired state for autoscaling the model
               variant.
             properties:
+              acceleratorCount:
+                default: 1
+                description: AcceleratorCount specifies the number of accelerators
+                  per replica.
+                minimum: 1
+                type: integer
+              acceleratorType:
+                description: |-
+                  AcceleratorType specifies the type of accelerator used by this variant (e.g., "nvidia-a100-80gb").
+                  This replaces the nested accelerator definition in ModelProfile.
+                type: string
+              maxReplicas:
+                description: |-
+                  MaxReplicas is the maximum number of replicas for this variant.
+                  If not specified, there is no upper limit.
+                format: int32
+                minimum: 1
+                type: integer
+              minReplicas:
+                description: |-
+                  MinReplicas is the minimum number of replicas for this variant.
+                  Defaults to 0 if not specified (allows scale to zero).
+                format: int32
+                minimum: 0
+                type: integer
               modelID:
                 description: ModelID specifies the unique identifier of the model
                   to be autoscaled.
                 minLength: 1
                 type: string
+              modelProfile:
+                description: |-
+                  ModelProfile provides resource and performance characteristics for the model variant.
+                  Deprecated: Use AcceleratorType, AcceleratorCount, and VariantProfile instead.
+                  Maintained for backward compatibility.
+                properties:
+                  accelerators:
+                    description: Accelerators is a list of accelerator profiles for
+                      the model variant.
+                    items:
+                      description: |-
+                        AcceleratorProfile defines the configuration for an accelerator used in autoscaling.
+                        It specifies the type and count of accelerator, as well as parameters for scaling behavior.
+                      properties:
+                        acc:
+                          description: Acc specifies the type or name of the accelerator
+                            (e.g., GPU type).
+                          minLength: 1
+                          type: string
+                        accCount:
+                          description: AccCount specifies the number of accelerator
+                            units to be used.
+                          minimum: 1
+                          type: integer
+                        maxBatchSize:
+                          description: MaxBatchSize is the maximum batch size supported
+                            by the accelerator.
+                          minimum: 1
+                          type: integer
+                        perfParms:
+                          description: PerParms specifies the prefill and decode parameters
+                            for ttft and itl models
+                          properties:
+                            decodeParms:
+                              additionalProperties:
+                                type: string
+                              description: |-
+                                DecodeParms contains parameters for the decode phase (ITL calculation)
+                                Expected keys: "alpha", "beta" for equation: itl = alpha + beta * maxBatchSize
+                              minProperties: 1
+                              type: object
+                            prefillParms:
+                              additionalProperties:
+                                type: string
+                              description: |-
+                                PrefillParms contains parameters for the prefill phase (TTFT calculation)
+                                Expected keys: "gamma", "delta" for equation: ttft = gamma + delta * tokens * maxBatchSize
+                              minProperties: 1
+                              type: object
+                          required:
+                          - decodeParms
+                          - prefillParms
+                          type: object
+                      required:
+                      - acc
+                      - accCount
+                      - maxBatchSize
+                      type: object
+                    type: array
+                type: object
               scaleTargetRef:
                 description: |-
                   ScaleTargetRef references the scalable resource to manage.
@@ -90,6 +181,43 @@ spec:
                   (used in saturation analysis).
                 pattern: ^\d+(\.\d+)?$
                 type: string
+              variantProfile:
+                description: |-
+                  VariantProfile provides performance characteristics for this specific variant.
+                  This is a simplified alternative to ModelProfile for single-accelerator deployments.
+                properties:
+                  maxBatchSize:
+                    description: MaxBatchSize is the maximum batch size supported
+                      by the variant.
+                    minimum: 1
+                    type: integer
+                  perfParms:
+                    description: PerfParms specifies the prefill and decode parameters
+                      for TTFT and ITL models.
+                    properties:
+                      decodeParms:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          DecodeParms contains parameters for the decode phase (ITL calculation)
+                          Expected keys: "alpha", "beta" for equation: itl = alpha + beta * maxBatchSize
+                        minProperties: 1
+                        type: object
+                      prefillParms:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          PrefillParms contains parameters for the prefill phase (TTFT calculation)
+                          Expected keys: "gamma", "delta" for equation: ttft = gamma + delta * tokens * maxBatchSize
+                        minProperties: 1
+                        type: object
+                    required:
+                    - decodeParms
+                    - prefillParms
+                    type: object
+                required:
+                - maxBatchSize
+                type: object
             required:
             - modelID
             - scaleTargetRef
@@ -170,14 +298,77 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              currentAlloc:
+                description: CurrentAlloc specifies the current resource allocation
+                  for the variant.
+                properties:
+                  accelerator:
+                    description: |-
+                      Accelerator is the type of accelerator currently allocated.
+                      Deprecated: Use spec.acceleratorType instead. Maintained for backward compatibility.
+                    type: string
+                  itlAverage:
+                    description: |-
+                      ITLAverage is the average inter token latency for the current allocation.
+                      Deprecated: Available via metrics from Prometheus.
+                    pattern: ^\d+(\.\d+)?$
+                    type: string
+                  load:
+                    description: |-
+                      Load describes the workload characteristics for the current allocation.
+                      Deprecated: Available via metrics from Prometheus.
+                    properties:
+                      arrivalRate:
+                        description: ArrivalRate is the rate of incoming requests
+                          in inference server.
+                        type: string
+                      avgInputTokens:
+                        description: AvgInputTokens is the average number of input(prefill)
+                          tokens per request in inference server.
+                        type: string
+                      avgOutputTokens:
+                        description: AvgOutputTokens is the average number of output(decode)
+                          tokens per request in inference server.
+                        type: string
+                    required:
+                    - arrivalRate
+                    - avgInputTokens
+                    - avgOutputTokens
+                    type: object
+                  maxBatch:
+                    description: |-
+                      MaxBatch is the maximum batch size currently allocated.
+                      Deprecated: Available via metrics from Prometheus.
+                    type: integer
+                  numReplicas:
+                    description: |-
+                      NumReplicas is the number of replicas currently allocated.
+                      This is the primary field; other fields are deprecated.
+                    minimum: 0
+                    type: integer
+                  ttftAverage:
+                    description: |-
+                      TTFTAverage is the average time to first token for the current allocation
+                      Deprecated: Available via metrics from Prometheus.
+                    pattern: ^\d+(\.\d+)?$
+                    type: string
+                  variantCost:
+                    description: |-
+                      VariantCost is the cost associated with the current variant allocation.
+                      Deprecated: Use spec.variantCost instead.
+                    pattern: ^\d+(\.\d+)?$
+                    type: string
+                required:
+                - numReplicas
+                type: object
               desiredOptimizedAlloc:
                 description: DesiredOptimizedAlloc indicates the target optimized
                   allocation based on autoscaling logic.
                 properties:
                   accelerator:
-                    description: Accelerator is the type of accelerator for the optimized
-                      allocation.
-                    minLength: 2
+                    description: |-
+                      Accelerator is the type of accelerator for the optimized allocation.
+                      Deprecated: Use spec.acceleratorType instead. Maintained for backward compatibility.
                     type: string
                   lastRunTime:
                     description: LastRunTime is the timestamp of the last optimization
@@ -187,10 +378,9 @@ spec:
                   numReplicas:
                     description: NumReplicas is the number of replicas for the optimized
                       allocation.
-                    minimum: 1
+                    minimum: 0
                     type: integer
                 required:
-                - accelerator
                 - numReplicas
                 type: object
             type: object

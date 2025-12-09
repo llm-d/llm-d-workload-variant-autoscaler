@@ -10,6 +10,52 @@
 # can handle the load, enabling cost optimization.
 
 ---
+# Example using the NEW simplified API (recommended for new deployments)
+apiVersion: llmd.ai/v1alpha1
+kind: VariantAutoscaling
+metadata:
+  name: llama-70b-premium-h100-simplified
+  namespace: llm-inference
+  labels:
+    app: llm-inference
+    model: llama-70b
+    variant: premium
+    accelerator: h100
+spec:
+  # Reference to the target Deployment to scale (follows HPA pattern)
+  scaleTargetRef:
+    kind: Deployment
+    name: llama-70b-premium-h100
+
+  # Model identifier (OpenAI API compatible)
+  modelID: "meta/llama-3.1-70b"
+
+  # NEW: Simplified accelerator configuration (preferred over modelProfile)
+  acceleratorType: "H100"
+  acceleratorCount: 1
+
+  # NEW: Scaling bounds (follows HPA pattern)
+  minReplicas: 1     # Minimum replicas (0 allows scale-to-zero)
+  maxReplicas: 10    # Maximum replicas
+
+  # Premium tier: H100 accelerator with higher cost
+  variantCost: "80.0"  # Cost per replica (reflects H100 premium pricing)
+
+  # NEW: Simplified variant profile for single-accelerator deployments
+  variantProfile:
+    maxBatchSize: 256
+    perfParms:
+      decodeParms:
+        # ITL equation: itl = alpha + beta * maxBatchSize
+        alpha: "15.2"   # Lower base latency (H100 is faster)
+        beta: "0.28"    # Lower per-batch overhead
+      prefillParms:
+        # TTFT equation: ttft = gamma + delta * tokens * maxBatchSize
+        gamma: "3.8"    # Lower base prefill time
+        delta: "0.07"   # Lower per-token cost
+
+---
+# Example using LEGACY API (maintained for backward compatibility)
 apiVersion: llmd.ai/v1alpha1
 kind: VariantAutoscaling
 metadata:
@@ -30,9 +76,10 @@ spec:
   modelID: "meta/llama-3.1-70b"
 
   # Premium tier: H100 accelerator with higher cost
-  variantCost: 80.0  # Cost per replica (reflects H100 premium pricing)
+  variantCost: "80.0"  # Cost per replica (reflects H100 premium pricing)
 
-  # Model profile for H100 accelerator
+  # DEPRECATED: Model profile for H100 accelerator
+  # Use acceleratorType, acceleratorCount, and variantProfile instead
   modelProfile:
     accelerators:
       - acc: "H100"

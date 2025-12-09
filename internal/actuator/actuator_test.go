@@ -214,8 +214,39 @@ var _ = Describe("Actuator", func() {
 						Name: contextResourceName,
 					},
 					ModelID: "test-model/variant-1",
+					ModelProfile: llmdVariantAutoscalingV1alpha1.ModelProfile{
+						Accelerators: []llmdVariantAutoscalingV1alpha1.AcceleratorProfile{
+							{
+								Acc:      "A100",
+								AccCount: 1,
+								PerfParms: llmdVariantAutoscalingV1alpha1.PerfParms{
+									DecodeParms: map[string]string{
+										"alpha": "20.58",
+										"beta":  "0.41",
+									},
+									PrefillParms: map[string]string{
+										"gamma": "200.58",
+										"delta": "0.041",
+									},
+								},
+								MaxBatchSize: 32,
+							},
+						},
+					},
 				},
 				Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
+					CurrentAlloc: llmdVariantAutoscalingV1alpha1.Allocation{
+						NumReplicas: 2,
+						Accelerator: "A100",
+						MaxBatch:    32,
+						VariantCost: "10.5",
+						ITLAverage:  "100.0",
+						// WaitAverage: "50.0",
+						Load: &llmdVariantAutoscalingV1alpha1.LoadProfile{
+							ArrivalRate: "10.0",
+							// AvgLength:   "512",
+						},
+					},
 					DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
 						NumReplicas: 4,
 						Accelerator: "A100",
@@ -332,8 +363,39 @@ var _ = Describe("Actuator", func() {
 						Name: contextResourceName,
 					},
 					ModelID: "test-model/metrics-test",
+					ModelProfile: llmdVariantAutoscalingV1alpha1.ModelProfile{
+						Accelerators: []llmdVariantAutoscalingV1alpha1.AcceleratorProfile{
+							{
+								Acc:      "A100",
+								AccCount: 1,
+								PerfParms: llmdVariantAutoscalingV1alpha1.PerfParms{
+									DecodeParms: map[string]string{
+										"alpha": "20.58",
+										"beta":  "0.41",
+									},
+									PrefillParms: map[string]string{
+										"gamma": "200.58",
+										"delta": "0.041",
+									},
+								},
+								MaxBatchSize: 32,
+							},
+						},
+					},
 				},
 				Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
+					CurrentAlloc: llmdVariantAutoscalingV1alpha1.Allocation{
+						NumReplicas: 1,
+						Accelerator: "A100",
+						MaxBatch:    32,
+						VariantCost: "5.0",
+						ITLAverage:  "80.0",
+						// WaitAverage: "30.0",
+						Load: &llmdVariantAutoscalingV1alpha1.LoadProfile{
+							ArrivalRate: "5.0",
+							// AvgLength:   "256",
+						},
+					},
 					DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
 						NumReplicas: 3,
 						Accelerator: "A100",
@@ -392,6 +454,25 @@ var _ = Describe("Actuator", func() {
 						Name: "incomplete-va",
 					},
 					ModelID: "test-model/incomplete",
+					ModelProfile: llmdVariantAutoscalingV1alpha1.ModelProfile{
+						Accelerators: []llmdVariantAutoscalingV1alpha1.AcceleratorProfile{
+							{
+								Acc:      "A100",
+								AccCount: 1,
+								PerfParms: llmdVariantAutoscalingV1alpha1.PerfParms{
+									DecodeParms: map[string]string{
+										"alpha": "20.58",
+										"beta":  "0.41",
+									},
+									PrefillParms: map[string]string{
+										"gamma": "200.58",
+										"delta": "0.041",
+									},
+								},
+								MaxBatchSize: 32,
+							},
+						},
+					},
 				},
 				Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
 					// DesiredOptimizedAlloc.NumReplicas will be 0 by default
@@ -461,8 +542,39 @@ var _ = Describe("Actuator", func() {
 						Name: contextResourceName,
 					},
 					ModelID: "test-model/validation-test",
+					ModelProfile: llmdVariantAutoscalingV1alpha1.ModelProfile{
+						Accelerators: []llmdVariantAutoscalingV1alpha1.AcceleratorProfile{
+							{
+								Acc:      "A100",
+								AccCount: 1,
+								PerfParms: llmdVariantAutoscalingV1alpha1.PerfParms{
+									DecodeParms: map[string]string{
+										"alpha": "20.58",
+										"beta":  "0.41",
+									},
+									PrefillParms: map[string]string{
+										"gamma": "200.58",
+										"delta": "0.041",
+									},
+								},
+								MaxBatchSize: 32,
+							},
+						},
+					},
 				},
 				Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
+					CurrentAlloc: llmdVariantAutoscalingV1alpha1.Allocation{
+						NumReplicas: 2,
+						Accelerator: "A100",
+						MaxBatch:    32,
+						VariantCost: "10.0",
+						ITLAverage:  "90.0",
+						// WaitAverage: "40.0",
+						Load: &llmdVariantAutoscalingV1alpha1.LoadProfile{
+							ArrivalRate: "8.0",
+							// AvgLength:   "384",
+						},
+					},
 					DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
 						NumReplicas: 5,
 						Accelerator: "A100",
