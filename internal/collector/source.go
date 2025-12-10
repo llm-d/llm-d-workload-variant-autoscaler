@@ -19,59 +19,45 @@ package collector
 import (
 	"context"
 	"time"
+
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/metricscache"
 )
 
-// SourceHealthStatus represents the health status of a metric source.
-type SourceHealthStatus string
+// MetricRequest defines a metric that a consumer needs.
+// Consumers (analytics, optimizer) register metric requests at startup.
+type MetricRequest struct {
+	// Name is the metric name (e.g., "vllm_gpu_cache_usage_perc").
+	Name string
 
-const (
-	// SourceHealthy indicates the source is responding normally.
-	SourceHealthy SourceHealthStatus = "healthy"
-
-	// SourceDegraded indicates the source is responding but with issues.
-	SourceDegraded SourceHealthStatus = "degraded"
-
-	// SourceUnhealthy indicates the source is not responding or erroring.
-	SourceUnhealthy SourceHealthStatus = "unhealthy"
-)
-
-// SourceHealth contains health information about a metric source.
-type SourceHealth struct {
-	// Status is the current health status of the source.
-	Status SourceHealthStatus
-
-	// LastCheck is the time of the last health check.
-	LastCheck time.Time
-
-	// LastSuccess is the time of the last successful query.
-	LastSuccess time.Time
-
-	// ConsecutiveFailures is the number of consecutive failed queries.
-	ConsecutiveFailures int
-
-	// Message provides additional context about the health status.
-	Message string
+	// Labels are required label matchers for the metric.
+	// Key: label name, Value: label value (exact match).
+	Labels map[string]string
 }
 
 // MetricSource is the interface for pluggable metric sources.
-// Implementations include PrometheusSource, KubernetesSource, DirectScrapeSource.
+// Implementations include PrometheusSource, EPPSource, etc.
+//
+// At startup, consumers register metrics they need via Register().
+// The source stores registered metrics internally and collects them.
 type MetricSource interface {
-	// Name returns the unique name of this source (e.g., "prometheus", "kubernetes").
+	// Name returns the unique name of this source (e.g., "prometheus", "epp").
 	Name() string
 
-	// SupportedCategories returns the metric categories this source can provide.
-	SupportedCategories() []MetricCategory
+	// CollectionInterval returns the actual collection interval for this source.
+	// The MetricsCollector uses this to run per-source tickers.
+	// Different sources have different latency characteristics:
+	// - EPP: 1-5s (fast, low overhead)
+	// - Prometheus: 15-30s (slower, aggregated queries)
+	// - Kubernetes API: 30-60s (rate-limited)
+	CollectionInterval() time.Duration
 
-	// Query performs a range query and returns time-series data.
-	// The returned TimeSeries contains data points between start and end.
-	Query(ctx context.Context, spec MetricSpec, start, end time.Time) (*TimeSeries, error)
+	// Register attempts to register a metric with this source.
+	// Returns true if this source can provide the metric, false otherwise.
+	// If true, the source stores the metric internally for collection.
+	// Called once at startup for each metric consumers need.
+	Register(metric MetricRequest) bool
 
-	// QueryInstant performs a point-in-time query and returns a single value.
-	QueryInstant(ctx context.Context, spec MetricSpec) (*MetricValue, error)
-
-	// Health returns the current health status of this source.
-	Health(ctx context.Context) SourceHealth
-
-	// Close releases any resources held by this source.
-	Close() error
+	// Collect returns current values for all registered metrics.
+	// Only collects metrics that were successfully registered via Register().
+	Collect(ctx context.Context) ([]metricscache.MetricValue, error)
 }
