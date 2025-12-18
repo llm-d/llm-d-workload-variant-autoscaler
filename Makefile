@@ -154,14 +154,10 @@ test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated 
 	export KUBECONFIG=$(KUBECONFIG) K8S_EXPECTED_VERSION=$(K8S_VERSION) && go test ./test/e2e-saturation-based/ -timeout 30m -v -ginkgo.v $(FOCUS_ARGS) $(SKIP_ARGS)
 
 # E2E tests on OpenShift cluster
-# Requires KUBECONFIG and pre-deployed infrastructure.
+# Supports KUBECONFIG or in-cluster authentication (for self-hosted runners).
 .PHONY: test-e2e-openshift
-test-e2e-openshift: ## Run the e2e tests on OpenShift. Requires KUBECONFIG and pre-deployed infrastructure.
+test-e2e-openshift: ## Run the e2e tests on OpenShift. Supports KUBECONFIG or in-cluster auth.
 	@echo "Running e2e tests on OpenShift cluster..."
-	@if [ -z "$(KUBECONFIG)" ]; then \
-		echo "Error: KUBECONFIG is not set"; \
-		exit 1; \
-	fi
 	$(eval FOCUS_ARGS := $(if $(FOCUS),-ginkgo.focus="$(FOCUS)",))
 	$(eval SKIP_ARGS := $(if $(SKIP),-ginkgo.skip="$(SKIP)",))
 
@@ -173,7 +169,6 @@ test-e2e-openshift: ## Run the e2e tests on OpenShift. Requires KUBECONFIG and p
 	DEPLOYMENT=$(DEPLOYMENT) \
 	REQUEST_RATE=$(REQUEST_RATE) \
 	NUM_PROMPTS=$(NUM_PROMPTS) \
-	KUBECONFIG=$(KUBECONFIG) \
 	go test ./test/e2e-openshift/ -timeout 30m -v -ginkgo.v $(FOCUS_ARGS) $(SKIP_ARGS)
 
 .PHONY: lint

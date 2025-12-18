@@ -1,0 +1,122 @@
+name: CI - OpenShift E2E Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: 'Model ID'
+        required: false
+        default: 'unsloth/Meta-Llama-3.1-8B'
+      accelerator_type:
+        description: 'Accelerator type (H100, A100, L40S)'
+        required: false
+        default: 'H100'
+      request_rate:
+        description: 'Request rate (req/s)'
+        required: false
+        default: '20'
+      num_prompts:
+        description: 'Number of prompts'
+        required: false
+        default: '3000'
+      skip_cleanup:
+        description: 'Skip cleanup after tests'
+        required: false
+        default: 'false'
+
+jobs:
+  e2e-openshift:
+    runs-on: [self-hosted, openshift]
+    env:
+      MODEL_ID: ${{ github.event.inputs.model_id || 'unsloth/Meta-Llama-3.1-8B' }}
+      ACCELERATOR_TYPE: ${{ github.event.inputs.accelerator_type || 'H100' }}
+      REQUEST_RATE: ${{ github.event.inputs.request_rate || '20' }}
+      NUM_PROMPTS: ${{ github.event.inputs.num_prompts || '3000' }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Extract Go version from go.mod
+        run: sed -En 's/^go (.*)$/GO_VERSION=\1/p' go.mod >> $GITHUB_ENV
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+          cache-dependency-path: ./go.sum
+
+      - name: Install tools (kubectl, oc, helm, make)
+        run: |
+          sudo apt-get update && sudo apt-get install -y make
+          # Install kubectl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          # Install oc (OpenShift CLI)
+          curl -LO "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz"
+          tar -xzf openshift-client-linux.tar.gz
+          sudo mv oc /usr/local/bin/
+          rm -f openshift-client-linux.tar.gz kubectl README.md
+          # Install helm
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Verify cluster access
+        run: |
+          echo "Verifying cluster access..."
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Deploy WVA and llm-d infrastructure
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          ENVIRONMENT: openshift
+          INSTALL_GATEWAY_CTRLPLANE: "false"
+          E2E_TESTS_ENABLED: "true"
+          NAMESPACE_SCOPED: "false"
+        run: |
+          echo "Deploying WVA and llm-d infrastructure..."
+          echo "  MODEL_ID: $MODEL_ID"
+          echo "  ACCELERATOR_TYPE: $ACCELERATOR_TYPE"
+          ./deploy/install.sh --model "$MODEL_ID" --accelerator "$ACCELERATOR_TYPE" --environment openshift
+
+      - name: Wait for infrastructure to be ready
+        run: |
+          echo "Waiting for WVA controller to be ready..."
+          kubectl wait --for=condition=available --timeout=300s deployment -l app.kubernetes.io/name=workload-variant-autoscaler -n workload-variant-autoscaler-system || true
+          kubectl get pods -n workload-variant-autoscaler-system
+          echo "Waiting for llm-d deployment to be ready..."
+          kubectl get pods -n llm-d-inference-scheduler
+
+      - name: Install Go dependencies
+        run: go mod download
+
+      - name: Run OpenShift E2E tests
+        env:
+          CONTROLLER_NAMESPACE: workload-variant-autoscaler-system
+          MONITORING_NAMESPACE: openshift-user-workload-monitoring
+          LLMD_NAMESPACE: llm-d-inference-scheduler
+          GATEWAY_NAME: infra-inference-scheduling-inference-gateway-istio
+          DEPLOYMENT: ms-inference-scheduling-llm-d-modelservice-decode
+        run: |
+          echo "Running OpenShift E2E tests with configuration:"
+          echo "  CONTROLLER_NAMESPACE: $CONTROLLER_NAMESPACE"
+          echo "  LLMD_NAMESPACE: $LLMD_NAMESPACE"
+          echo "  DEPLOYMENT: $DEPLOYMENT"
+          echo "  GATEWAY_NAME: $GATEWAY_NAME"
+          echo "  MODEL_ID: $MODEL_ID"
+          echo "  REQUEST_RATE: $REQUEST_RATE"
+          echo "  NUM_PROMPTS: $NUM_PROMPTS"
+          make test-e2e-openshift
+
+      # TODO: Re-enable cleanup after debugging
+      # - name: Cleanup infrastructure
+      #   if: always() && github.event.inputs.skip_cleanup != 'true'
+      #   env:
+      #     ENVIRONMENT: openshift
+      #   run: |
+      #     echo "Cleaning up infrastructure..."
+      #     ./deploy/install.sh --undeploy --environment openshift || true
