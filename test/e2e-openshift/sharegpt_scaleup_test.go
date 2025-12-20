@@ -169,11 +169,18 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 				_, _ = fmt.Fprintf(GinkgoWriter, "Found HPA: %s (targets %s)\n", hpaName, model.deployment)
 
 				By("finding vllm-service by label selector")
+				// Use release-specific label selector if WVA_RELEASE_NAME is set
+				// This prevents picking up services from previous/parallel test runs
+				labelSelector := "app.kubernetes.io/name=workload-variant-autoscaler"
+				if wvaReleaseName != "" {
+					labelSelector = fmt.Sprintf("%s,app.kubernetes.io/instance=%s", labelSelector, wvaReleaseName)
+					_, _ = fmt.Fprintf(GinkgoWriter, "Using release-specific label selector: %s\n", labelSelector)
+				}
 				svcList, err := k8sClient.CoreV1().Services(model.namespace).List(ctx, metav1.ListOptions{
-					LabelSelector: "app.kubernetes.io/name=workload-variant-autoscaler",
+					LabelSelector: labelSelector,
 				})
 				Expect(err).NotTo(HaveOccurred(), "Should be able to list services")
-				Expect(svcList.Items).NotTo(BeEmpty(), "At least one WVA vllm-service should exist")
+				Expect(svcList.Items).NotTo(BeEmpty(), "At least one WVA vllm-service should exist for release %s", wvaReleaseName)
 
 				// Find service that matches this model's deployment
 				for _, svc := range svcList.Items {
