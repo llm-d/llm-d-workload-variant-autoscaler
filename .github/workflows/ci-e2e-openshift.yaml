@@ -133,13 +133,20 @@ jobs:
       HPA_STABILIZATION_SECONDS: ${{ github.event.inputs.hpa_stabilization_seconds || '30' }}
       SKIP_CLEANUP: ${{ github.event.inputs.skip_cleanup || 'false' }}
       # PR-specific namespaces for isolation between concurrent PR tests
-      # llm-d infrastructure (vLLM, gateway, EPP)
+      # Primary llm-d namespace (Model A1 + A2)
       LLMD_NAMESPACE: llm-d-inference-scheduler-pr-${{ github.event.pull_request.number || github.run_id }}
-      # WVA controller and related resources
+      # Secondary llm-d namespace (Model B)
+      LLMD_NAMESPACE_B: llm-d-inference-scheduler-pr-${{ github.event.pull_request.number || github.run_id }}-b
+      # WVA controller namespace (monitors all models)
       WVA_NAMESPACE: llm-d-autoscaler-pr-${{ github.event.pull_request.number || github.run_id }}
-      # Unique release names per run to avoid conflicts with other concurrent runs
+      # Unique release names per run to avoid conflicts
       WVA_RELEASE_NAME: wva-e2e-${{ github.run_id }}
-      LLMD_RELEASE_SUFFIX: e2e-${{ github.run_id }}
+      # Model A1: Primary deployment in LLMD_NAMESPACE
+      MODEL_A1_RELEASE: model-a1-${{ github.run_id }}
+      # Model A2: Secondary deployment in LLMD_NAMESPACE
+      MODEL_A2_RELEASE: model-a2-${{ github.run_id }}
+      # Model B: Deployment in LLMD_NAMESPACE_B
+      MODEL_B_RELEASE: model-b-${{ github.run_id }}
       # Use the image built in the previous job
       WVA_IMAGE_TAG: ${{ needs.build-image.outputs.image_tag }}
     steps:
@@ -281,10 +288,17 @@ jobs:
           echo "  HF token configuration: ✓"
           ./deploy/install.sh --model "$MODEL_ID" --accelerator "$ACCELERATOR_TYPE" --release-name "$WVA_RELEASE_NAME" --environment openshift
 
+      - name: Create secondary namespace for Model B
+        run: |
+          echo "Creating secondary namespace for Model B..."
+          kubectl create namespace "$LLMD_NAMESPACE_B" --dry-run=client -o yaml | kubectl apply -f -
+          echo "Secondary namespace $LLMD_NAMESPACE_B created"
+
       - name: Label namespaces for OpenShift monitoring
         run: |
           echo "Adding openshift.io/user-monitoring label to namespaces for Prometheus scraping..."
           kubectl label namespace "$LLMD_NAMESPACE" openshift.io/user-monitoring=true --overwrite
+          kubectl label namespace "$LLMD_NAMESPACE_B" openshift.io/user-monitoring=true --overwrite
           kubectl label namespace "$WVA_NAMESPACE" openshift.io/user-monitoring=true --overwrite
           echo "Namespace labels applied"
 
@@ -293,51 +307,193 @@ jobs:
           echo "Waiting for WVA controller to be ready..."
           kubectl wait --for=condition=available --timeout=300s deployment -l app.kubernetes.io/name=workload-variant-autoscaler -n "$WVA_NAMESPACE" || true
           kubectl get pods -n "$WVA_NAMESPACE"
-          echo "Waiting for llm-d deployment to be ready..."
+          echo "Waiting for llm-d deployment (Model A1) to be ready..."
           kubectl get pods -n "$LLMD_NAMESPACE"
 
-      - name: Patch vLLM deployment for e2e testing
+      - name: Deploy Model A2 in primary namespace
+        env:
+          # Deploy second variant in same namespace, monitored by existing WVA controller
+          LLMD_NS: ${{ env.LLMD_NAMESPACE }}
+          WVA_NS: ${{ env.WVA_NAMESPACE }}
         run: |
-          echo "Patching vLLM decode deployment to limit batch size for scaling test..."
+          echo "Deploying Model A2 (second variant) in $LLMD_NAMESPACE..."
+          echo "  Release name: $MODEL_A2_RELEASE"
+
+          # Create a copy of Model A1's decode deployment for Model A2
+          # This creates a second vLLM instance in the same namespace
+          MODEL_A2_DEPLOYMENT="model-a2-decode"
+          SOURCE_DEPLOYMENT="ms-inference-scheduling-llm-d-modelservice-decode"
+
+          echo "Creating Model A2 deployment from $SOURCE_DEPLOYMENT..."
+          kubectl get deployment "$SOURCE_DEPLOYMENT" -n "$LLMD_NAMESPACE" -o yaml | \
+            sed "s/$SOURCE_DEPLOYMENT/$MODEL_A2_DEPLOYMENT/g" | \
+            sed 's/replicas: [0-9]*/replicas: 1/' | \
+            kubectl apply -n "$LLMD_NAMESPACE" -f -
+
+          echo "Waiting for Model A2 deployment to be ready..."
+          kubectl rollout status deployment/"$MODEL_A2_DEPLOYMENT" -n "$LLMD_NAMESPACE" --timeout=300s || true
+
+          # Deploy WVA resources (VA, HPA, ServiceMonitor) for Model A2
+          # controller.enabled=false since we're using the existing WVA controller
+          helm upgrade -i "$MODEL_A2_RELEASE" ./charts/workload-variant-autoscaler \
+            -n "$WVA_NAMESPACE" \
+            --set controller.enabled=false \
+            --set va.enabled=true \
+            --set hpa.enabled=true \
+            --set llmd.namespace="$LLMD_NAMESPACE" \
+            --set llmd.modelName="$MODEL_A2_DEPLOYMENT" \
+            --set llmd.modelID="$MODEL_ID" \
+            --set va.accelerator="$ACCELERATOR_TYPE" \
+            --set wva.baseName="model-a2" \
+            --set wva.prometheus.monitoringNamespace=openshift-user-workload-monitoring
+
+          echo "Model A2 WVA resources deployed"
+          kubectl get deployment "$MODEL_A2_DEPLOYMENT" -n "$LLMD_NAMESPACE" || true
+          kubectl get hpa -n "$LLMD_NAMESPACE" -l app.kubernetes.io/instance="$MODEL_A2_RELEASE" || true
+          kubectl get variantautoscaling -n "$LLMD_NAMESPACE" -l app.kubernetes.io/instance="$MODEL_A2_RELEASE" || true
+
+      - name: Deploy Model B infrastructure in secondary namespace
+        env:
+          # HF_TOKEN is inherited from GITHUB_ENV
+          ENVIRONMENT: openshift
+          INSTALL_GATEWAY_CTRLPLANE: "false"
+          E2E_TESTS_ENABLED: "true"
+          NAMESPACE_SCOPED: "false"
+          # Override namespaces for Model B stack
+          LLMD_NS: ${{ env.LLMD_NAMESPACE_B }}
+          WVA_NS: ${{ env.WVA_NAMESPACE }}
+          # Skip WVA controller and prometheus (use existing)
+          DEPLOY_WVA: "false"
+          DEPLOY_PROMETHEUS: "false"
+          DEPLOY_PROMETHEUS_ADAPTER: "false"
+          DEPLOY_VA: "false"
+          DEPLOY_HPA: "false"
+        run: |
+          echo "Deploying Model B infrastructure in $LLMD_NAMESPACE_B..."
+          echo "  MODEL_ID: $MODEL_ID"
+          echo "  ACCELERATOR_TYPE: $ACCELERATOR_TYPE"
+
+          # Deploy llm-d infrastructure only (no WVA controller, no VA/HPA)
+          ./deploy/install.sh --model "$MODEL_ID" --accelerator "$ACCELERATOR_TYPE" --environment openshift
+
+          echo "Waiting for Model B deployment to be ready..."
+          kubectl wait --for=condition=available --timeout=300s deployment --all -n "$LLMD_NAMESPACE_B" || true
+          kubectl get pods -n "$LLMD_NAMESPACE_B"
+
+      - name: Deploy Model B WVA resources
+        env:
+          LLMD_NS: ${{ env.LLMD_NAMESPACE_B }}
+          WVA_NS: ${{ env.WVA_NAMESPACE }}
+        run: |
+          echo "Deploying Model B WVA resources..."
+          echo "  Release name: $MODEL_B_RELEASE"
+
+          # Deploy WVA resources (VA, HPA, ServiceMonitor) for Model B
+          # controller.enabled=false since we're using the existing WVA controller
+          helm upgrade -i "$MODEL_B_RELEASE" ./charts/workload-variant-autoscaler \
+            -n "$WVA_NAMESPACE" \
+            --set controller.enabled=false \
+            --set va.enabled=true \
+            --set hpa.enabled=true \
+            --set llmd.namespace="$LLMD_NAMESPACE_B" \
+            --set llmd.modelName="ms-inference-scheduling-llm-d-modelservice-decode" \
+            --set llmd.modelID="$MODEL_ID" \
+            --set va.accelerator="$ACCELERATOR_TYPE" \
+            --set wva.baseName="inference-scheduling" \
+            --set wva.prometheus.monitoringNamespace=openshift-user-workload-monitoring
+
+          echo "Model B WVA resources deployed"
+          kubectl get hpa -n "$LLMD_NAMESPACE_B" -l app.kubernetes.io/instance="$MODEL_B_RELEASE" || true
+          kubectl get variantautoscaling -n "$LLMD_NAMESPACE_B" -l app.kubernetes.io/instance="$MODEL_B_RELEASE" || true
+
+      - name: Verify multi-model deployment
+        run: |
+          echo "=== Multi-Model Deployment Status ==="
+          echo ""
+          echo "=== Model A1 (Primary, $LLMD_NAMESPACE) ==="
+          kubectl get deployment -n "$LLMD_NAMESPACE" | grep -E "decode|NAME" || true
+          kubectl get hpa -n "$LLMD_NAMESPACE" || true
+          kubectl get variantautoscaling -n "$LLMD_NAMESPACE" || true
+          echo ""
+          echo "=== Model B ($LLMD_NAMESPACE_B) ==="
+          kubectl get deployment -n "$LLMD_NAMESPACE_B" | grep -E "decode|NAME" || true
+          kubectl get hpa -n "$LLMD_NAMESPACE_B" || true
+          kubectl get variantautoscaling -n "$LLMD_NAMESPACE_B" || true
+          echo ""
+          echo "=== WVA Controller ($WVA_NAMESPACE) ==="
+          kubectl get pods -n "$WVA_NAMESPACE"
+
+      - name: Patch vLLM deployments for e2e testing
+        run: |
+          echo "Patching vLLM decode deployments to limit batch size for scaling test..."
           echo "  MAX_NUM_SEQS: $MAX_NUM_SEQS"
-          DEPLOYMENT_NAME="ms-inference-scheduling-llm-d-modelservice-decode"
 
-          # Find the vllm container index (container name is typically "vllm")
-          echo "Looking for vllm container in deployment..."
-          kubectl get deployment "$DEPLOYMENT_NAME" -n "$LLMD_NAMESPACE" \
-            -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}'
+          # Function to patch a deployment with --max-num-seqs
+          patch_deployment() {
+            local deployment_name=$1
+            local namespace=$2
+            echo ""
+            echo "Patching deployment $deployment_name in $namespace..."
 
-          # Try to find container named "vllm", fall back to index 0
-          CONTAINER_INDEX="$(
-            kubectl get deployment "$DEPLOYMENT_NAME" -n "$LLMD_NAMESPACE" \
-              -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
-            | awk '$1 == "vllm" {print NR-1; exit}'
-          )"
-          if [ -z "$CONTAINER_INDEX" ]; then
-            echo "Container 'vllm' not found, using index 0"
-            CONTAINER_INDEX=0
-          fi
-          echo "Using container index: $CONTAINER_INDEX"
+            # Find the vllm container index
+            CONTAINER_INDEX="$(
+              kubectl get deployment "$deployment_name" -n "$namespace" \
+                -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
+              | awk '$1 == "vllm" {print NR-1; exit}'
+            )"
+            if [ -z "$CONTAINER_INDEX" ]; then
+              echo "  Container 'vllm' not found, using index 0"
+              CONTAINER_INDEX=0
+            fi
+            echo "  Using container index: $CONTAINER_INDEX"
 
-          # Add --max-num-seqs to force scaling under load
-          kubectl patch deployment "$DEPLOYMENT_NAME" -n "$LLMD_NAMESPACE" --type=json -p="[
-            {\"op\": \"add\", \"path\": \"/spec/template/spec/containers/$CONTAINER_INDEX/args/-\", \"value\": \"--max-num-seqs=$MAX_NUM_SEQS\"}
-          ]"
-          echo "Waiting for patched deployment to roll out..."
-          kubectl rollout status deployment/"$DEPLOYMENT_NAME" -n "$LLMD_NAMESPACE" --timeout=300s
+            # Add --max-num-seqs to force scaling under load
+            kubectl patch deployment "$deployment_name" -n "$namespace" --type=json -p="[
+              {\"op\": \"add\", \"path\": \"/spec/template/spec/containers/$CONTAINER_INDEX/args/-\", \"value\": \"--max-num-seqs=$MAX_NUM_SEQS\"}
+            ]"
+            echo "  Waiting for patched deployment to roll out..."
+            kubectl rollout status deployment/"$deployment_name" -n "$namespace" --timeout=300s
+          }
 
-      - name: Patch HPA for faster e2e testing
+          # Patch Model A1 deployment
+          patch_deployment "ms-inference-scheduling-llm-d-modelservice-decode" "$LLMD_NAMESPACE"
+
+          # Patch Model A2 deployment
+          patch_deployment "model-a2-decode" "$LLMD_NAMESPACE"
+
+          # Patch Model B deployment
+          patch_deployment "ms-inference-scheduling-llm-d-modelservice-decode" "$LLMD_NAMESPACE_B"
+
+          echo ""
+          echo "All vLLM deployments patched successfully"
+
+      - name: Patch HPAs for faster e2e testing
         run: |
-          echo "Patching HPA stabilization window for e2e testing..."
+          echo "Patching HPA stabilization windows for e2e testing..."
           echo "  HPA_STABILIZATION_SECONDS: $HPA_STABILIZATION_SECONDS"
-          # Find HPA by label selector (name includes release name)
-          HPA_NAME=$(kubectl get hpa -n "$LLMD_NAMESPACE" -l app.kubernetes.io/name=workload-variant-autoscaler -o jsonpath='{.items[0].metadata.name}')
-          echo "  HPA_NAME: $HPA_NAME"
-          kubectl patch hpa "$HPA_NAME" -n "$LLMD_NAMESPACE" --type=json -p='[
-            {"op": "replace", "path": "/spec/behavior/scaleUp/stabilizationWindowSeconds", "value": '"$HPA_STABILIZATION_SECONDS"'},
-            {"op": "replace", "path": "/spec/behavior/scaleDown/stabilizationWindowSeconds", "value": '"$HPA_STABILIZATION_SECONDS"'}
-          ]'
+
+          # Function to patch HPAs in a namespace
+          patch_hpas_in_namespace() {
+            local namespace=$1
+            echo ""
+            echo "Patching HPAs in namespace $namespace..."
+            for HPA_NAME in $(kubectl get hpa -n "$namespace" -l app.kubernetes.io/name=workload-variant-autoscaler -o jsonpath='{.items[*].metadata.name}'); do
+              echo "  Patching HPA: $HPA_NAME"
+              kubectl patch hpa "$HPA_NAME" -n "$namespace" --type=json -p='[
+                {"op": "replace", "path": "/spec/behavior/scaleUp/stabilizationWindowSeconds", "value": '"$HPA_STABILIZATION_SECONDS"'},
+                {"op": "replace", "path": "/spec/behavior/scaleDown/stabilizationWindowSeconds", "value": '"$HPA_STABILIZATION_SECONDS"'}
+              ]' || true
+            done
+          }
+
+          # Patch HPAs in both namespaces
+          patch_hpas_in_namespace "$LLMD_NAMESPACE"
+          patch_hpas_in_namespace "$LLMD_NAMESPACE_B"
+
+          echo ""
+          echo "All HPAs:"
           kubectl get hpa -n "$LLMD_NAMESPACE"
+          kubectl get hpa -n "$LLMD_NAMESPACE_B"
 
       - name: Install Go dependencies
         run: go mod download
@@ -347,6 +503,10 @@ jobs:
           CONTROLLER_NAMESPACE: ${{ env.WVA_NAMESPACE }}
           MONITORING_NAMESPACE: openshift-user-workload-monitoring
           LLMD_NAMESPACE: ${{ env.LLMD_NAMESPACE }}
+          # Multi-model testing: secondary namespace for Model B
+          LLMD_NAMESPACE_B: ${{ env.LLMD_NAMESPACE_B }}
+          # Model A2 deployment name
+          DEPLOYMENT_A2: model-a2-decode
           GATEWAY_NAME: infra-inference-scheduling-inference-gateway-istio
           DEPLOYMENT: ms-inference-scheduling-llm-d-modelservice-decode
           # Pass WVA_RELEASE_NAME so test can filter for current run's resources
@@ -355,7 +515,9 @@ jobs:
           echo "Running OpenShift E2E tests with configuration:"
           echo "  CONTROLLER_NAMESPACE: $CONTROLLER_NAMESPACE"
           echo "  LLMD_NAMESPACE: $LLMD_NAMESPACE"
+          echo "  LLMD_NAMESPACE_B: $LLMD_NAMESPACE_B (multi-model)"
           echo "  DEPLOYMENT: $DEPLOYMENT"
+          echo "  DEPLOYMENT_A2: $DEPLOYMENT_A2"
           echo "  GATEWAY_NAME: $GATEWAY_NAME"
           echo "  MODEL_ID: $MODEL_ID"
           echo "  REQUEST_RATE: $REQUEST_RATE"
@@ -368,24 +530,41 @@ jobs:
         run: |
           echo "Cleaning up ALL test infrastructure..."
           echo "  LLMD_NAMESPACE: $LLMD_NAMESPACE"
+          echo "  LLMD_NAMESPACE_B: $LLMD_NAMESPACE_B"
           echo "  WVA_NAMESPACE: $WVA_NAMESPACE"
           echo "  WVA_RELEASE_NAME: $WVA_RELEASE_NAME"
+          echo "  MODEL_A2_RELEASE: $MODEL_A2_RELEASE"
+          echo "  MODEL_B_RELEASE: $MODEL_B_RELEASE"
 
-          # Uninstall helm releases before deleting namespaces
+          # Uninstall all WVA helm releases before deleting namespaces
           # This ensures proper cleanup of resources and removes helm tracking
-          echo "Uninstalling WVA helm release..."
+          echo "Uninstalling WVA helm releases..."
           helm uninstall "$WVA_RELEASE_NAME" -n "$WVA_NAMESPACE" --ignore-not-found --wait --timeout 60s || true
+          helm uninstall "$MODEL_A2_RELEASE" -n "$WVA_NAMESPACE" --ignore-not-found --wait --timeout 60s || true
+          helm uninstall "$MODEL_B_RELEASE" -n "$WVA_NAMESPACE" --ignore-not-found --wait --timeout 60s || true
 
-          echo "Uninstalling llm-d helm releases..."
-          # List and uninstall all helm releases in the llm-d namespace
+          echo "Uninstalling llm-d helm releases in primary namespace..."
           for release in $(helm list -n "$LLMD_NAMESPACE" -q 2>/dev/null); do
             echo "  Uninstalling release: $release"
             helm uninstall "$release" -n "$LLMD_NAMESPACE" --ignore-not-found --wait --timeout 60s || true
           done
 
-          # Delete both PR-specific namespaces
+          echo "Uninstalling llm-d helm releases in secondary namespace..."
+          for release in $(helm list -n "$LLMD_NAMESPACE_B" -q 2>/dev/null); do
+            echo "  Uninstalling release: $release"
+            helm uninstall "$release" -n "$LLMD_NAMESPACE_B" --ignore-not-found --wait --timeout 60s || true
+          done
+
+          # Delete Model A2 deployment (not managed by helm)
+          echo "Deleting Model A2 deployment..."
+          kubectl delete deployment model-a2-decode -n "$LLMD_NAMESPACE" --ignore-not-found || true
+
+          # Delete all PR-specific namespaces
           echo "Deleting llm-d namespace $LLMD_NAMESPACE..."
           kubectl delete namespace "$LLMD_NAMESPACE" --ignore-not-found --timeout=120s || true
+
+          echo "Deleting llm-d namespace $LLMD_NAMESPACE_B..."
+          kubectl delete namespace "$LLMD_NAMESPACE_B" --ignore-not-found --timeout=120s || true
 
           echo "Deleting WVA namespace $WVA_NAMESPACE..."
           kubectl delete namespace "$WVA_NAMESPACE" --ignore-not-found --timeout=120s || true

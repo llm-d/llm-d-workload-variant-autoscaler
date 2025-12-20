@@ -43,14 +43,20 @@ var (
 	controllerNamespace = getEnvString("CONTROLLER_NAMESPACE", "workload-variant-autoscaler-system")
 	monitoringNamespace = getEnvString("MONITORING_NAMESPACE", "openshift-user-workload-monitoring")
 	llmDNamespace       = getEnvString("LLMD_NAMESPACE", "llm-d-inference-scheduler")
-	gatewayName         = getEnvString("GATEWAY_NAME", "infra-inference-scheduling-inference-gateway")
-	modelID             = getEnvString("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
-	deployment          = getEnvString("DEPLOYMENT", "ms-inference-scheduling-llm-d-modelservice-decode")
-	requestRate         = getEnvInt("REQUEST_RATE", 20)
-	numPrompts          = getEnvInt("NUM_PROMPTS", 3000)
+	// Secondary llm-d namespace for Model B (multi-model testing)
+	llmDNamespaceB = getEnvString("LLMD_NAMESPACE_B", "")
+	gatewayName    = getEnvString("GATEWAY_NAME", "infra-inference-scheduling-inference-gateway")
+	modelID        = getEnvString("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
+	deployment     = getEnvString("DEPLOYMENT", "ms-inference-scheduling-llm-d-modelservice-decode")
+	// Model A2 deployment name (second model in primary namespace)
+	deploymentA2 = getEnvString("DEPLOYMENT_A2", "model-a2-decode")
+	requestRate  = getEnvInt("REQUEST_RATE", 20)
+	numPrompts   = getEnvInt("NUM_PROMPTS", 3000)
 	// WVA_RELEASE_NAME is used to filter resources for the current test run
 	// This prevents conflicts when multiple runs exist simultaneously
 	wvaReleaseName = getEnvString("WVA_RELEASE_NAME", "")
+	// Multi-model mode is enabled when LLMD_NAMESPACE_B is set
+	multiModelMode = llmDNamespaceB != ""
 )
 
 var (
@@ -136,6 +142,10 @@ var _ = BeforeSuite(func() {
 	_, _ = fmt.Fprintf(GinkgoWriter, "CONTROLLER_NAMESPACE=%s\n", controllerNamespace)
 	_, _ = fmt.Fprintf(GinkgoWriter, "MONITORING_NAMESPACE=%s\n", monitoringNamespace)
 	_, _ = fmt.Fprintf(GinkgoWriter, "LLMD_NAMESPACE=%s\n", llmDNamespace)
+	if multiModelMode {
+		_, _ = fmt.Fprintf(GinkgoWriter, "LLMD_NAMESPACE_B=%s (multi-model mode enabled)\n", llmDNamespaceB)
+		_, _ = fmt.Fprintf(GinkgoWriter, "DEPLOYMENT_A2=%s\n", deploymentA2)
+	}
 	_, _ = fmt.Fprintf(GinkgoWriter, "GATEWAY_NAME=%s\n", gatewayName)
 	_, _ = fmt.Fprintf(GinkgoWriter, "MODEL_ID=%s\n", modelID)
 	_, _ = fmt.Fprintf(GinkgoWriter, "DEPLOYMENT=%s\n", deployment)
@@ -156,7 +166,7 @@ var _ = BeforeSuite(func() {
 		}
 	}, 2*time.Minute, 1*time.Second).Should(Succeed())
 
-	By("verifying that llm-d infrastructure is running")
+	By("verifying that llm-d infrastructure (Model A1) is running")
 	Eventually(func(g Gomega) {
 		// Check Gateway
 		deploymentList, err := k8sClient.AppsV1().Deployments(llmDNamespace).List(ctx, metav1.ListOptions{})
@@ -172,6 +182,42 @@ var _ = BeforeSuite(func() {
 		}
 		g.Expect(vllmDeployment.Status.ReadyReplicas).To(BeNumerically(">", 0), "At least one vLLM replica should be ready")
 	}, 5*time.Minute, 5*time.Second).Should(Succeed())
+
+	// Verify multi-model infrastructure if enabled
+	if multiModelMode {
+		By("verifying that Model A2 deployment is running")
+		Eventually(func(g Gomega) {
+			vllmDeployment, err := k8sClient.AppsV1().Deployments(llmDNamespace).Get(ctx, deploymentA2, metav1.GetOptions{})
+			g.Expect(err).NotTo(HaveOccurred(), "Model A2 deployment should exist")
+			g.Expect(vllmDeployment.Status.ReadyReplicas).To(BeNumerically(">", 0), "At least one Model A2 replica should be ready")
+		}, 5*time.Minute, 5*time.Second).Should(Succeed())
+
+		By("verifying that Model B infrastructure is running")
+		Eventually(func(g Gomega) {
+			// Check that Model B namespace has deployments
+			deploymentList, err := k8sClient.AppsV1().Deployments(llmDNamespaceB).List(ctx, metav1.ListOptions{})
+			g.Expect(err).NotTo(HaveOccurred(), "Should be able to list deployments in Model B namespace")
+			g.Expect(deploymentList.Items).NotTo(BeEmpty(), "Model B deployments should exist")
+
+			// Check that Model B vLLM deployment exists
+			vllmDeployment, err := k8sClient.AppsV1().Deployments(llmDNamespaceB).Get(ctx, deployment, metav1.GetOptions{})
+			g.Expect(err).NotTo(HaveOccurred(), "Model B vLLM deployment should exist")
+			g.Expect(vllmDeployment.Status.ReadyReplicas).To(BeNumerically(">", 0), "At least one Model B replica should be ready")
+		}, 5*time.Minute, 5*time.Second).Should(Succeed())
+
+		By("verifying WVA resources for all models")
+		Eventually(func(g Gomega) {
+			// Check that VariantAutoscaling resources exist for all models
+			vaList := &v1alpha1.VariantAutoscalingList{}
+			err := crClient.List(ctx, vaList, client.MatchingLabels{
+				"app.kubernetes.io/name": "workload-variant-autoscaler",
+			})
+			g.Expect(err).NotTo(HaveOccurred(), "Should be able to list VariantAutoscalings")
+			// Expect at least 3 VAs: Model A1, Model A2, Model B
+			_, _ = fmt.Fprintf(GinkgoWriter, "Found %d VariantAutoscaling resources\n", len(vaList.Items))
+			g.Expect(len(vaList.Items)).To(BeNumerically(">=", 3), "Should have at least 3 VariantAutoscaling resources for multi-model mode")
+		}, 2*time.Minute, 5*time.Second).Should(Succeed())
+	}
 
 	By("verifying that Prometheus Adapter is running")
 	Eventually(func(g Gomega) {
