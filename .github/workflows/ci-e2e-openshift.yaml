@@ -321,12 +321,17 @@ jobs:
 
           # Create a copy of Model A1's decode deployment for Model A2
           # This creates a second vLLM instance in the same namespace
+          # IMPORTANT: Must update both the name AND the model label to avoid HPA conflicts
           MODEL_A2_DEPLOYMENT="model-a2-decode"
           SOURCE_DEPLOYMENT="ms-inference-scheduling-llm-d-modelservice-decode"
+          SOURCE_MODEL_LABEL="ms-inference-scheduling-llm-d-modelservice"
+          MODEL_A2_LABEL="model-a2"
 
           echo "Creating Model A2 deployment from $SOURCE_DEPLOYMENT..."
+          echo "  Updating model label from $SOURCE_MODEL_LABEL to $MODEL_A2_LABEL"
           kubectl get deployment "$SOURCE_DEPLOYMENT" -n "$LLMD_NAMESPACE" -o yaml | \
             sed "s/$SOURCE_DEPLOYMENT/$MODEL_A2_DEPLOYMENT/g" | \
+            sed "s/$SOURCE_MODEL_LABEL/$MODEL_A2_LABEL/g" | \
             sed 's/replicas: [0-9]*/replicas: 1/' | \
             kubectl apply -n "$LLMD_NAMESPACE" -f -
 
