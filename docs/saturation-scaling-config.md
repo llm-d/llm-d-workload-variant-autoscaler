@@ -6,10 +6,12 @@ The Workload Variant Autoscaler supports saturation-based scaling using KV cache
 
 **Key features:**
 - ✅ ConfigMap-based configuration with global defaults and per-model overrides
-- ✅ **Efficient caching** with single read on startup (zero API calls during reconciliation)
+- ✅ **Efficient caching** with shared in-memory cache (zero API calls during optimization)
 - ✅ **Automatic reload** via ConfigMap watch (immediate response to changes)
 - ✅ **Thread-safe** concurrent access with RWMutex
 - ✅ Graceful degradation to defaults if ConfigMap missing
+
+> **Architecture Note:** WVA uses a controller-managed configuration cache to eliminate API overhead during optimization cycles. See [Configuration Management Architecture](design/config-management.md) for implementation details.
 
 ## Configuration
 
@@ -630,4 +632,11 @@ The caching mechanism uses the following components:
 - Controller starts successfully even if ConfigMap missing
 - Uses hardcoded defaults as fallback
 - Automatically loads config once ConfigMap becomes available
+
+## Related Documentation
+
+- **[Configuration Management Architecture](design/config-management.md)** - Detailed explanation of shared cache architecture, thread safety, and ConfigMap watch implementation
+- **[Saturation Analyzer](saturation-analyzer.md)** - How saturation analysis uses these configuration parameters
+- **[Metrics & Health Monitoring](metrics-health-monitoring.md)** - Metrics emitted during saturation-based scaling
+
 
