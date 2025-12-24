@@ -382,34 +382,40 @@ jobs:
           echo "HF_TOKEN=$HF_TOKEN" >> $GITHUB_ENV
           echo "HF token retrieved successfully from cluster secret"
 
-      - name: Clean up orphaned WVA resources
+      - name: Clean up resources for this PR
         run: |
-          echo "Cleaning up orphaned WVA resources from previous runs..."
+          echo "Cleaning up WVA resources for this PR's namespaces only..."
+          echo "  LLMD_NAMESPACE: $LLMD_NAMESPACE"
+          echo "  LLMD_NAMESPACE_B: $LLMD_NAMESPACE_B"
+          echo "  WVA_NAMESPACE: $WVA_NAMESPACE"
 
-          # Clean up orphaned HPAs and VAs in ALL namespaces
-          # This handles resources left over from cancelled runs
-          echo "Removing ALL orphaned WVA HPAs and VAs across all namespaces..."
-          kubectl delete hpa -A -l app.kubernetes.io/name=workload-variant-autoscaler --ignore-not-found || true
-          kubectl delete variantautoscaling -A -l app.kubernetes.io/name=workload-variant-autoscaler --ignore-not-found || true
-
-          # Clean up orphaned PR-specific namespaces from previous runs
-          # Pattern: llm-d-inference-scheduler-pr-* and llm-d-autoscaler-pr-*
-          echo "Cleaning up orphaned PR-specific namespaces..."
-          for ns in $(kubectl get ns -o name | grep -E 'llm-d-(inference-scheduler|autoscaler|autoscaling)-pr-' | cut -d/ -f2); do
-            echo "Cleaning up orphaned namespace: $ns"
-            # Uninstall all helm releases in the namespace first
-            for release in $(helm list -n "$ns" -q 2>/dev/null); do
-              echo "  Uninstalling helm release: $release"
-              helm uninstall "$release" -n "$ns" --ignore-not-found --wait --timeout 60s || true
-            done
-            echo "  Deleting namespace: $ns"
-            kubectl delete namespace "$ns" --ignore-not-found --timeout=60s || true
+          # Only clean up the 3 namespaces associated with THIS PR
+          # Do NOT touch namespaces from other PRs to avoid race conditions
+          for ns in "$LLMD_NAMESPACE" "$LLMD_NAMESPACE_B" "$WVA_NAMESPACE"; do
+            if kubectl get namespace "$ns" &>/dev/null; then
+              echo ""
+              echo "=== Cleaning up namespace: $ns ==="
+              # Delete WVA resources in this namespace
+              echo "  Removing HPAs and VAs..."
+              kubectl delete hpa -n "$ns" -l app.kubernetes.io/name=workload-variant-autoscaler --ignore-not-found || true
+              kubectl delete variantautoscaling -n "$ns" -l app.kubernetes.io/name=workload-variant-autoscaler --ignore-not-found || true
+              # Uninstall all helm releases in the namespace
+              for release in $(helm list -n "$ns" -q 2>/dev/null); do
+                echo "  Uninstalling helm release: $release"
+                helm uninstall "$release" -n "$ns" --ignore-not-found --wait --timeout 60s || true
+              done
+              echo "  Deleting namespace: $ns"
+              kubectl delete namespace "$ns" --ignore-not-found --timeout=60s || true
+            else
+              echo "Namespace $ns does not exist, skipping cleanup"
+            fi
           done
 
-          # Clean up legacy namespaces if they exist
+          # Clean up legacy namespaces if they exist (these are not PR-specific)
           for legacy_ns in llm-d-inference-scheduler workload-variant-autoscaler-system; do
             if kubectl get namespace "$legacy_ns" &>/dev/null; then
-              echo "Cleaning up legacy namespace: $legacy_ns"
+              echo ""
+              echo "=== Cleaning up legacy namespace: $legacy_ns ==="
               # Uninstall all helm releases in the namespace first
               for release in $(helm list -n "$legacy_ns" -q 2>/dev/null); do
                 echo "  Uninstalling helm release: $release"
@@ -420,11 +426,8 @@ jobs:
             fi
           done
 
-          # Clean up cluster-scoped WVA resources
-          echo "Removing cluster-scoped WVA resources..."
-          kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/name=workload-variant-autoscaler --ignore-not-found || true
-
-          echo "Orphaned resource cleanup complete"
+          echo ""
+          echo "Cleanup complete for this PR's namespaces"
 
       - name: Apply latest CRDs
         run: |
