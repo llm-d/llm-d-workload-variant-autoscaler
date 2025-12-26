@@ -34,6 +34,7 @@ Integration with other systems:
 Understanding how WVA works:
 
 - **[Modeling & Optimization](design/modeling-optimization.md)** - Queue theory models and optimization algorithms
+- **[Common Cache Layer](design/common-cache-layer.md)** - Shared state management architecture for controllers and engines
 - **[Architecture Limitations](design/architecture-limitations.md)** - **Important:** Model architecture assumptions and limitations (READ THIS if using HSSM, MoE, or non-standard architectures)
 - **[Architecture Diagrams](design/diagrams/)** - System architecture and workflows
 

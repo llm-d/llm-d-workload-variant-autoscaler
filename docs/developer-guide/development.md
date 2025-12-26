@@ -54,9 +54,14 @@ workload-variant-autoscaler/
 ├── internal/              # Private application code
 │   ├── controller/       # Controller implementation
 │   ├── collector/        # Metrics collection
+│   ├── engines/          # Autoscaling engines
+│   │   ├── common/      # Shared cache layer for engines
+│   │   ├── saturation/  # Saturation-based engine
+│   │   ├── executor/    # Engine execution framework
+│   │   └── model/       # Model-based engine
 │   ├── optimizer/        # Optimization logic
 │   ├── actuator/         # Metric emission & scaling
-│   └── modelanalyzer/    # Model analysis
+│   └── saturation/       # Saturation analysis
 ├── pkg/                   # Public libraries
 │   ├── analyzer/         # Queue theory models
 │   ├── solver/           # Optimization algorithms
@@ -68,6 +73,35 @@ workload-variant-autoscaler/
 └── tools/                 # Development tools
     └── vllm-emulator/    # Testing emulator
 ```
+
+## Key Architectural Concepts
+
+### Common Cache Layer
+
+WVA uses a shared cache layer (`internal/engines/common/`) to enable efficient communication between Controllers and Engines without repeated API server queries. The cache layer includes:
+
+1. **Decision Cache** - Stores scaling decisions made by engines
+2. **Global Configuration** - Shared autoscaler configuration
+3. **VariantAutoscaling Cache** - In-memory copies of VA CRs
+4. **Decision Trigger Channel** - Event channel for triggering reconciliations
+
+**Key Benefits:**
+- Reduces API server load
+- Enables fast optimization cycles (< 1 second intervals)
+- Thread-safe concurrent access
+- Simplified engine implementations
+
+For detailed architecture and usage patterns, see [Common Cache Layer Architecture](../design/common-cache-layer.md).
+
+### Engine Architecture
+
+WVA supports multiple autoscaling engines that can run concurrently:
+
+- **Saturation Engine** (`internal/engines/saturation/`) - Reactive scaling based on KV cache and queue depth
+- **Model Engine** (`internal/engines/model/`) - Predictive scaling using queueing theory
+- **Executor Framework** (`internal/engines/executor/`) - Polling-based execution for engines
+
+All engines use the common cache layer to share state with the controller.
 
 ## Development Workflow
 

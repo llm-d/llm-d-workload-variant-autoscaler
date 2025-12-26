@@ -87,6 +87,52 @@ var _ = Describe("Optimizer", func() {
 - **Keep tests fast** - unit tests should run in milliseconds
 - **Use descriptive test names** - clearly state what is being tested
 - **Follow AAA pattern** - Arrange, Act, Assert
+- **Test thread safety** - Use `go test -race` to detect race conditions
+
+### Testing the Common Cache Layer
+
+The common cache layer (`internal/engines/common/`) requires special attention to thread-safety:
+
+```bash
+# Run cache tests with race detector
+go test -race ./internal/engines/common/...
+
+# Run with verbose output
+go test -v ./internal/engines/common/...
+
+# Test coverage
+go test -cover ./internal/engines/common/...
+```
+
+**Key Test Scenarios:**
+- Concurrent reads and writes (simulating multiple goroutines)
+- Decision cache operations (Set/Get)
+- Global configuration updates
+- VA cache operations (Update/Remove/GetReadyVAs)
+- Deleted VA filtering
+
+Example concurrent test:
+
+```go
+func TestConcurrentAccess(t *testing.T) {
+    cache := &InternalDecisionCache{
+        items: make(map[string]interfaces.VariantDecision),
+    }
+    
+    var wg sync.WaitGroup
+    for i := 0; i < 100; i++ {
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            cache.Set("va1", "ns1", decision)
+            cache.Get("va1", "ns1")
+        }()
+    }
+    wg.Wait()
+}
+```
+
+For more details on the cache architecture, see [Common Cache Layer Architecture](../design/common-cache-layer.md).
 
 ## Integration Tests
 
