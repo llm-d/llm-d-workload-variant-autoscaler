@@ -42,6 +42,7 @@ Understanding how WVA works:
 Contributing to WVA:
 
 - **[Development Setup](developer-guide/development.md)** - Setting up your dev environment
+- **[Testing Guide](developer-guide/testing.md)** - Comprehensive testing strategy and tools
 - **[Agentic Workflows](developer-guide/agentic-workflows.md)** - AI-powered automation workflows
 - **[Debugging](developer-guide/debugging.md)** - Debugging techniques and tools
 - **[Contributing](../CONTRIBUTING.md)** - How to contribute to the project

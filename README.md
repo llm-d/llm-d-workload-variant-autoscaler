@@ -82,11 +82,14 @@ See the [Installation Guide](docs/user-guide/installation.md) for detailed instr
 - [**Architecture Limitations**](docs/design/architecture-limitations.md) - **Important:** Read this if using HSSM, MoE, or non-standard architectures
 - [Architecture Diagrams](docs/design/diagrams/) - Visual architecture and workflow diagrams
 -->
-<!-- 
+
 ### Developer Guide
 - [Development Setup](docs/developer-guide/development.md)
+- [Testing Guide](docs/developer-guide/testing.md)
+- [Agentic Workflows](docs/developer-guide/agentic-workflows.md)
+- [Debugging](docs/developer-guide/debugging.md)
 - [Contributing](CONTRIBUTING.md)
--->
+
 ### Deployment Options
 - [Kubernetes Deployment](deploy/kubernetes/README.md)
 - [OpenShift Deployment](deploy/openshift/README.md)
