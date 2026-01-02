@@ -12,9 +12,8 @@ The Workload-Variant-Autoscaler (WVA) is a Kubernetes controller that performs i
 
 - **Intelligent Autoscaling**: Optimizes replica count and GPU allocation based on inference server saturation
 - **Cost Optimization**: Minimizes infrastructure costs while meeting SLO requirements
-<!-- 
 - **Performance Modeling**: Uses queueing theory (M/M/1/k, M/G/1 models) for accurate latency and throughput prediction
-- **Multi-Model Support**: Manages multiple models with different service classes and priorities -->
+- **Multi-Model Support**: Manages multiple models with different service classes and priorities
 
 ## Quick Start
 
@@ -63,30 +62,32 @@ See the [Installation Guide](docs/user-guide/installation.md) for detailed instr
 - [Configuration](docs/user-guide/configuration.md)
 - [CRD Reference](docs/user-guide/crd-reference.md)
 
-<!-- 
-
 ### Tutorials
 - [Quick Start Demo](docs/tutorials/demo.md)
 - [Parameter Estimation](docs/tutorials/parameter-estimation.md)
 - [vLLM Server Setup](docs/tutorials/vllm-samples.md)
--->
+- [GuideLLM Sample](docs/tutorials/guidellm-sample.md)
+
 ### Integrations
 - [HPA Integration](docs/integrations/hpa-integration.md)
 - [KEDA Integration](docs/integrations/keda-integration.md)
 - [Prometheus Metrics](docs/integrations/prometheus.md)
-
-<!-- 
+- [Metrics & Health Monitoring](docs/metrics-health-monitoring.md)
 
 ### Design & Architecture
 - [Architecture Overview](docs/design/modeling-optimization.md)
 - [**Architecture Limitations**](docs/design/architecture-limitations.md) - **Important:** Read this if using HSSM, MoE, or non-standard architectures
 - [Architecture Diagrams](docs/design/diagrams/) - Visual architecture and workflow diagrams
--->
-<!-- 
+- [Saturation Analyzer](docs/saturation-analyzer.md)
+- [Saturation Scaling Configuration](docs/saturation-scaling-config.md)
+
 ### Developer Guide
 - [Development Setup](docs/developer-guide/development.md)
+- [Testing Guide](docs/developer-guide/testing.md)
+- [Debugging Guide](docs/developer-guide/debugging.md)
+- [Agentic Workflows](docs/developer-guide/agentic-workflows.md)
 - [Contributing](CONTRIBUTING.md)
--->
+
 ### Deployment Options
 - [Kubernetes Deployment](deploy/kubernetes/README.md)
 - [OpenShift Deployment](deploy/openshift/README.md)
@@ -94,37 +95,29 @@ See the [Installation Guide](docs/user-guide/installation.md) for detailed instr
 
 ## Architecture
 
+![WVA Architecture](docs/design/diagrams/inferno-WVA-design.png)
+
 WVA consists of several key components:
 
 - **Reconciler**: Kubernetes controller that manages VariantAutoscaling resources
 - **Collector**: Gathers cluster state and vLLM server metrics
-<!-- 
 - **Model Analyzer**: Performs per-model analysis using queueing theory
-- **Optimizer**: Makes global scaling decisions across models
--->
-- **Optimizer**: Capacity model provides saturation based scaling based on threshold
+- **Optimizer**: Makes global scaling decisions across models (capacity model provides saturation-based scaling)
 - **Actuator**: Emits metrics to Prometheus and updates deployment replicas
 
-<!-- 
 For detailed architecture information, see the [design documentation](docs/design/modeling-optimization.md).
--->
 ## How It Works
 
 1. Platform admin deploys llm-d infrastructure (including model servers) and waits for servers to warm up and start serving requests
 2. Platform admin creates a `VariantAutoscaling` CR for the running deployment
 3. WVA continuously monitors request rates and server performance via Prometheus metrics
-<!-- 
-4. Model Analyzer estimates latency and throughput using queueing models
-5. Optimizer solves for minimal cost allocation meeting all SLOs
--->
-4. Capacity model obtains KV cache utilization and queue depth of inference servers with slack capacity to determine replicas
-5. Actuator emits optimization metrics to Prometheus and updates VariantAutoscaling status
-6. External autoscaler (HPA/KEDA) reads the metrics and scales the deployment accordingly
+4. Model Analyzer estimates latency and throughput using queueing models (capacity model obtains KV cache utilization and queue depth)
+5. Optimizer solves for minimal cost allocation meeting all SLOs (determines replicas with slack capacity)
+6. Actuator emits optimization metrics to Prometheus and updates VariantAutoscaling status
+7. External autoscaler (HPA/KEDA) reads the metrics and scales the deployment accordingly
 
 **Important Notes**:
-<!-- 
-- Create the VariantAutoscaling CR **only after** your deployment is warmed up to avoid immediate scale-down
--->
+- Create the VariantAutoscaling CR **after** your deployment is warmed up to ensure accurate initial metrics
 - Configure HPA stabilization window (recommend 120s+) for gradual scaling behavior
 - WVA updates the VA status with current and desired allocations every reconciliation cycle
 
