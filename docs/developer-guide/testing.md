@@ -25,6 +25,7 @@ go test -cover ./...
 # Run specific package
 go test ./internal/optimizer/...
 go test ./pkg/analyzer/...
+go test ./internal/collector/prometheus/...
 
 # Run with verbose output
 go test -v ./internal/controller/...
@@ -46,9 +47,27 @@ internal/
 ├── optimizer/
 │   ├── optimizer.go
 │   └── optimizer_test.go
-└── collector/
-    ├── collector.go
-    └── collector_test.go
+├── collector/
+│   ├── cache/
+│   │   ├── cache.go
+│   │   ├── cache_test.go
+│   │   ├── memory_cache.go
+│   │   └── noop_cache.go
+│   ├── config/
+│   │   ├── config.go
+│   │   └── config_test.go
+│   ├── prometheus/
+│   │   ├── prometheus_collector.go
+│   │   ├── prometheus_collector_test.go
+│   │   ├── background_fetching.go
+│   │   ├── background_fetching_test.go
+│   │   ├── cache_operations.go
+│   │   └── saturation_metrics.go
+│   ├── collector.go
+│   └── factory.go
+└── saturation/
+    ├── analyzer.go
+    └── analyzer_test.go
 ```
 
 ### Writing Unit Tests

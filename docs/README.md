@@ -42,6 +42,8 @@ Understanding how WVA works:
 Contributing to WVA:
 
 - **[Development Setup](developer-guide/development.md)** - Setting up your dev environment
+- **[Metrics Collector Architecture](developer-guide/metrics-collector.md)** - Metrics collection, caching, and background fetching
+- **[Testing Guide](developer-guide/testing.md)** - Unit, integration, and E2E testing
 - **[Agentic Workflows](developer-guide/agentic-workflows.md)** - AI-powered automation workflows
 - **[Debugging](developer-guide/debugging.md)** - Debugging techniques and tools
 - **[Contributing](../CONTRIBUTING.md)** - How to contribute to the project

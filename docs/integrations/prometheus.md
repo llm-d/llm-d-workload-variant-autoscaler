@@ -1,4 +1,36 @@
-# Custom Metrics Documentation
+# Prometheus Integration
+
+The WVA controller integrates with Prometheus to collect vLLM metrics and expose custom autoscaling metrics. This document covers both aspects of the Prometheus integration.
+
+## Overview
+
+WVA uses Prometheus for two purposes:
+
+1. **Metric Collection** - Query vLLM server metrics (KV cache, queue depth, request rates)
+2. **Metric Exposition** - Expose WVA's scaling decisions as custom metrics
+
+## Metric Collection Architecture
+
+WVA uses a sophisticated metrics collector with caching and background fetching to minimize latency and Prometheus load. For detailed architecture information, see the [Metrics Collector Architecture](../developer-guide/metrics-collector.md) documentation.
+
+### Key Features
+
+- **Intelligent caching** - Reduces Prometheus query load by 70-90%
+- **Background fetching** - Proactive metric collection to minimize reconciliation latency
+- **Freshness tracking** - Monitors metric age and staleness
+- **Thread-safe operations** - Concurrent access from multiple goroutines
+
+### Configuration
+
+The metrics collector is configured automatically with sensible defaults:
+
+- **Cache TTL**: 30 seconds
+- **Background fetch interval**: 30 seconds  
+- **Freshness threshold**: 1 minute (fresh), 5 minutes (unavailable)
+
+These defaults work well for most production deployments. For custom configuration, see the [Metrics Collector Architecture](../developer-guide/metrics-collector.md) guide.
+
+## WVA Custom Metrics
 
 The WVA exposes a focused set of custom metrics that provide insights into the autoscaling behavior and optimization performance. These metrics are exposed via Prometheus and can be used for monitoring, alerting, and dashboard creation.
 
@@ -99,3 +131,10 @@ abs(inferno_desired_replicas - inferno_current_replicas)
 # Scaling frequency by reason
 rate(inferno_replica_scaling_total[5m]) by (reason)
 ```
+
+## Related Documentation
+
+- **[Metrics Collector Architecture](../developer-guide/metrics-collector.md)** - Detailed guide on metrics collection, caching, and background fetching
+- **[Configuration Guide](../user-guide/configuration.md)** - WVA configuration options
+- **[Saturation Analyzer](../saturation-analyzer.md)** - How saturation analysis uses vLLM metrics
+- **[Metrics & Health Monitoring](../metrics-health-monitoring.md)** - Monitoring WVA health and performance
