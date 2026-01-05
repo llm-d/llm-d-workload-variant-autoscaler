@@ -11,6 +11,7 @@ Getting started and using WVA:
 - **[Installation Guide](user-guide/installation.md)** - Installing WVA on your cluster
 - **[Configuration](user-guide/configuration.md)** - Configuring WVA for your workloads
 - **[CRD Reference](user-guide/crd-reference.md)** - Complete API reference for VariantAutoscaling
+- **[Troubleshooting](user-guide/troubleshooting.md)** - Common issues and debugging techniques
 
 ### Tutorials
 
@@ -33,6 +34,7 @@ Integration with other systems:
 
 Understanding how WVA works:
 
+- **[Controller Architecture](design/controller-architecture.md)** - Controller internals, watches, and reconciliation flow
 - **[Modeling & Optimization](design/modeling-optimization.md)** - Queue theory models and optimization algorithms
 - **[Architecture Limitations](design/architecture-limitations.md)** - **Important:** Model architecture assumptions and limitations (READ THIS if using HSSM, MoE, or non-standard architectures)
 - **[Architecture Diagrams](design/diagrams/)** - System architecture and workflows
