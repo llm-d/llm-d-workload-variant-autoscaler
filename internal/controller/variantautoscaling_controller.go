@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	promoperator "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
@@ -78,6 +79,10 @@ const (
 	defaultServiceMonitorName = "workload-variant-autoscaler-controller-manager-metrics-monitor"
 
 	defaultSaturationConfigMapName = "saturation-scaling-config"
+
+	// deploymentNotFoundRetryDelay is the delay before retrying reconciliation
+	// when the target deployment is not yet created
+	deploymentNotFoundRetryDelay = 10 * time.Second
 )
 
 func getNamespace() string {
@@ -158,11 +163,12 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 	var deployment appsv1.Deployment
 	if err := utils.GetDeploymentWithBackoff(ctx, r.Client, scaleTargetName, va.Namespace, &deployment); err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Info("Scale target Deployment not found",
+			logger.Info("Scale target Deployment not found, will retry",
 				"name", scaleTargetName,
 				"namespace", va.Namespace)
-			// Don't requeue if deployment is missing, wait for it to be created
-			return ctrl.Result{}, nil
+			// Requeue after delay to wait for deployment to be created
+			// This handles the case where VA is created before its target deployment
+			return ctrl.Result{RequeueAfter: deploymentNotFoundRetryDelay}, nil
 		}
 		logger.Error(err, "Failed to get scale target Deployment",
 			"name", scaleTargetName,
