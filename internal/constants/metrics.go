@@ -78,10 +78,11 @@ const (
 // Metric Label Names
 // Common label names used across metrics for consistency.
 const (
-	LabelModelName       = "model_name"
-	LabelNamespace       = "namespace"
-	LabelVariantName     = "variant_name"
-	LabelDirection       = "direction"
-	LabelReason          = "reason"
-	LabelAcceleratorType = "accelerator_type"
+	LabelModelName          = "model_name"
+	LabelNamespace          = "namespace"
+	LabelVariantName        = "variant_name"
+	LabelDirection          = "direction"
+	LabelReason             = "reason"
+	LabelAcceleratorType    = "accelerator_type"
+	LabelControllerInstance = "controller_instance"
 )

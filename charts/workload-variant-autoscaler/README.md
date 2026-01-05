@@ -22,6 +22,7 @@ Helm chart for Workload-Variant-Autoscaler (WVA) - GPU-aware autoscaler for LLM 
 | vllmService.interval | string | `"15s"` |  |
 | vllmService.nodePort | int | `30000` |  |
 | vllmService.scheme | string | `"http"` |  |
+| wva.controllerInstance | string | `""` | Controller instance label for multi-controller isolation |
 | wva.enabled | bool | `true` |  |
 | wva.experimentalHybridOptimization | enum | `off` | supports on, off, and model-only |
 | wva.image.repository | string | `"ghcr.io/llm-d-incubation/workload-variant-autoscaler"` |  |
@@ -163,6 +164,57 @@ helm install workload-variant-autoscaler ./workload-variant-autoscaler \
   --set wva.prometheus.tls.insecureSkipVerify=true \
   --set wva.image.tag=v0.0.1-dev
 ```
+
+### Multi-Controller Isolation
+
+When running multiple WVA controllers in the same cluster (e.g., for parallel e2e tests or multi-tenant environments), use the `controllerInstance` configuration to prevent metrics conflicts between controllers.
+
+#### How It Works
+
+When `wva.controllerInstance` is set:
+1. The controller adds a `controller_instance` label to all emitted metrics
+2. The HPA selector includes `controller_instance` to filter metrics from the specific controller
+3. Each controller only sees metrics from its own instance, preventing conflicts
+
+#### Configuration
+
+**Via Helm:**
+```bash
+helm install my-wva ./workload-variant-autoscaler \
+  -n my-namespace \
+  --set wva.controllerInstance="my-unique-instance-id"
+```
+
+**Via Environment Variable (install.sh):**
+```bash
+CONTROLLER_INSTANCE="my-unique-instance-id" ./deploy/install.sh
+```
+
+**Via values.yaml:**
+```yaml
+wva:
+  controllerInstance: "my-unique-instance-id"
+```
+
+#### E2E Testing Example
+
+For parallel e2e tests, each test run can use a unique controller instance:
+```bash
+# Each PR/run uses its namespace as the controller instance
+CONTROLLER_INSTANCE="llm-d-autoscaler-pr-123" ./deploy/install.sh
+```
+
+This ensures that:
+- Metrics from PR-123's controller have `controller_instance="llm-d-autoscaler-pr-123"`
+- HPA for PR-123 only considers metrics with that label
+- Stale controllers from other PRs don't affect the HPA decisions
+
+#### Backwards Compatibility
+
+When `wva.controllerInstance` is not set (empty string):
+- No `controller_instance` label is added to metrics
+- HPA selector does not filter by `controller_instance`
+- Behavior is identical to previous versions
 
 ### CLEANUP
 ```

@@ -39,6 +39,9 @@ VLLM_SVC_NODEPORT=${VLLM_SVC_NODEPORT:-30000}
 SKIP_TLS_VERIFY=${SKIP_TLS_VERIFY:-"false"}
 WVA_LOG_LEVEL=${WVA_LOG_LEVEL:-"info"}
 VALUES_FILE=${VALUES_FILE:-"$WVA_PROJECT/charts/workload-variant-autoscaler/values.yaml"}
+# Controller instance identifier for multi-controller isolation (optional)
+# When set, adds controller_instance label to metrics and HPA selectors
+CONTROLLER_INSTANCE=${CONTROLLER_INSTANCE:-""}
 
 # llm-d Configuration
 LLM_D_OWNER=${LLM_D_OWNER:-"llm-d"}
@@ -140,6 +143,7 @@ Environment Variables:
   DEPLOY_HPA                   Deploy HPA (default: true)
   UNDEPLOY                     Undeploy mode (default: false)
   DELETE_NAMESPACES            Delete namespaces after undeploy (default: false)
+  CONTROLLER_INSTANCE          Controller instance label for multi-controller isolation (optional)
 
 Examples:
   # Deploy with default values
@@ -426,7 +430,8 @@ deploy_wva_controller() {
         --set vllmService.nodePort=$VLLM_SVC_NODEPORT \
         --set wva.logging.level=$WVA_LOG_LEVEL \
         --set wva.prometheus.tls.insecureSkipVerify=$SKIP_TLS_VERIFY \
-        --set wva.namespaceScoped=$NAMESPACE_SCOPED
+        --set wva.namespaceScoped=$NAMESPACE_SCOPED \
+        ${CONTROLLER_INSTANCE:+--set wva.controllerInstance=$CONTROLLER_INSTANCE}
     
     # Wait for WVA to be ready
     log_info "Waiting for WVA controller to be ready..."

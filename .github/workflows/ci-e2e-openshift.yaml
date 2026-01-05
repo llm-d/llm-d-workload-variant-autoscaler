@@ -446,6 +446,8 @@ jobs:
           # Pass PR-specific namespaces to install script
           LLMD_NS: ${{ env.LLMD_NAMESPACE }}
           WVA_NS: ${{ env.WVA_NAMESPACE }}
+          # Controller instance label for multi-controller isolation in parallel e2e tests
+          CONTROLLER_INSTANCE: ${{ env.WVA_NAMESPACE }}
         run: |
           echo "Deploying WVA and llm-d infrastructure..."
           echo "  MODEL_ID: $MODEL_ID"
@@ -454,6 +456,7 @@ jobs:
           echo "  WVA_NS: $WVA_NS"
           echo "  WVA_RELEASE_NAME: $WVA_RELEASE_NAME"
           echo "  WVA_IMAGE_TAG: $WVA_IMAGE_TAG"
+          echo "  CONTROLLER_INSTANCE: $CONTROLLER_INSTANCE"
           echo "  HF token configuration: ✓"
           ./deploy/install.sh --model "$MODEL_ID" --accelerator "$ACCELERATOR_TYPE" --release-name "$WVA_RELEASE_NAME" --environment openshift
 
@@ -511,9 +514,12 @@ jobs:
         env:
           LLMD_NS: ${{ env.LLMD_NAMESPACE_B }}
           WVA_NS: ${{ env.WVA_NAMESPACE }}
+          # Use same controller instance as Model A for HPA selector matching
+          CONTROLLER_INSTANCE: ${{ env.WVA_NAMESPACE }}
         run: |
           echo "Deploying Model B WVA resources..."
           echo "  Release name: $MODEL_B_RELEASE"
+          echo "  CONTROLLER_INSTANCE: $CONTROLLER_INSTANCE"
 
           # Deploy WVA resources (VA, HPA, ServiceMonitor) for Model B
           # controller.enabled=false since we're using the existing WVA controller
@@ -528,7 +534,8 @@ jobs:
             --set llmd.modelID="$MODEL_ID" \
             --set va.accelerator="$ACCELERATOR_TYPE" \
             --set wva.baseName="inference-scheduling" \
-            --set wva.prometheus.monitoringNamespace=openshift-user-workload-monitoring
+            --set wva.prometheus.monitoringNamespace=openshift-user-workload-monitoring \
+            --set wva.controllerInstance="$CONTROLLER_INSTANCE"
 
           echo "Model B WVA resources deployed"
           kubectl get hpa -n "$LLMD_NAMESPACE_B" -l app.kubernetes.io/instance="$MODEL_B_RELEASE" || true

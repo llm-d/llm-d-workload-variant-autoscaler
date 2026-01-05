@@ -46,6 +46,11 @@ wva:
   # Example: "wva.llmd.ai/shard=instance-a"
   nodeSelector: ""
   scaleToZero: false  # Enable scaling variants to zero replicas (default: false)
+  # Controller instance identifier for multi-controller isolation
+  # When set, adds controller_instance label to all emitted metrics
+  # Used with HPA selector to filter metrics from specific controller instances
+  # Useful for parallel e2e tests where multiple WVA controllers run simultaneously
+  controllerInstance: ""
 
   # Saturation-based scaling configuration
   # These thresholds determine when replicas are saturated and when to scale up
