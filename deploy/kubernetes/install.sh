@@ -47,23 +47,32 @@ create_namespaces() {
     log_info "Creating namespaces..."
 
     for ns in $WVA_NS $MONITORING_NAMESPACE $LLMD_NS; do
-        # Check if namespace exists and handle terminating state
+        local ns_exists=false
+        local ns_terminating=false
+
+        # Check namespace state
         if kubectl get namespace $ns &> /dev/null; then
+            ns_exists=true
             local ns_status=$(kubectl get namespace $ns -o jsonpath='{.status.phase}' 2>/dev/null)
             if [ "$ns_status" = "Terminating" ]; then
-                log_info "Namespace $ns is terminating, forcing deletion..."
-                # Remove finalizers to force deletion
-                kubectl get namespace $ns -o json | \
-                    jq '.spec.finalizers = []' | \
-                    kubectl replace --raw "/api/v1/namespaces/$ns/finalize" -f - 2>/dev/null || true
-                # Wait for namespace to be fully deleted
-                kubectl wait --for=delete namespace/$ns --timeout=120s 2>/dev/null || true
-            else
-                log_info "Namespace $ns already exists"
-                continue
+                ns_terminating=true
             fi
         fi
-        # Create namespace if it doesn't exist or was terminating
+
+        # Handle each case explicitly
+        if [ "$ns_exists" = true ] && [ "$ns_terminating" = false ]; then
+            # Namespace exists and is active - skip
+            log_info "Namespace $ns already exists"
+            continue
+        elif [ "$ns_terminating" = true ]; then
+            # Namespace is terminating - force delete and recreate
+            log_info "Namespace $ns is terminating, forcing deletion..."
+            kubectl get namespace $ns -o json | \
+                jq '.spec.finalizers = []' | \
+                kubectl replace --raw "/api/v1/namespaces/$ns/finalize" -f - 2>/dev/null || true
+            kubectl wait --for=delete namespace/$ns --timeout=120s 2>/dev/null || true
+        fi
+        # At this point: namespace doesn't exist OR was terminating and is now deleted
         kubectl create namespace $ns
         log_success "Namespace $ns created"
     done
