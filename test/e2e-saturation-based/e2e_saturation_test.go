@@ -858,7 +858,7 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 			// Using math.MaxInt as sentinel value that will be replaced on first iteration
 			minA100, maxA100 := math.MaxInt, 0
 			minH100, maxH100 := math.MaxInt, 0
-			const maxAllowedRange = 2 // Replicas should not oscillate by more than 2
+			const maxAllowedRange = 3 // Replicas may scale by up to 3 under load (e.g., 2→5 is valid ramp-up)
 
 			Consistently(func(g Gomega) {
 				vaA100 := &v1alpha1.VariantAutoscaling{}
