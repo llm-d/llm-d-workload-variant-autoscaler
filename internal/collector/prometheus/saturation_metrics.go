@@ -55,37 +55,6 @@ func escapePrometheusLabelValue(value string) string {
 	return value
 }
 
-// contextWithRespectedDeadline creates a timeout context that respects the parent context deadline.
-// If the parent has a deadline shorter than the desired timeout, uses the parent's remaining time minus a buffer.
-// Returns the context and cancel function.
-func contextWithRespectedDeadline(parent context.Context, desiredTimeout time.Duration) (context.Context, context.CancelFunc) {
-	deadline, hasDeadline := parent.Deadline()
-	if !hasDeadline {
-		// No parent deadline, use desired timeout
-		return context.WithTimeout(parent, desiredTimeout)
-	}
-
-	// Calculate remaining time from parent deadline
-	remaining := time.Until(deadline)
-	if remaining <= 0 {
-		// Parent already expired, use minimal timeout
-		return context.WithTimeout(parent, time.Millisecond)
-	}
-
-	// If remaining time is less than desired, use remaining minus buffer
-	const deadlineBuffer = 100 * time.Millisecond
-	if remaining < desiredTimeout {
-		timeout := remaining - deadlineBuffer
-		if timeout < time.Millisecond {
-			timeout = time.Millisecond
-		}
-		return context.WithTimeout(parent, timeout)
-	}
-
-	// Parent deadline is generous, use desired timeout
-	return context.WithTimeout(parent, desiredTimeout)
-}
-
 // CollectReplicaMetrics collects KV cache and queue metrics for all replicas of a model.
 // It queries Prometheus for:
 // - constants.VLLMKvCacheUsagePerc (KV cache utilization 0.0-1.0)
@@ -187,8 +156,8 @@ func (cmc *SaturationMetricsCollector) queryKvCacheMetrics(
 	query := fmt.Sprintf(`max by (pod) (max_over_time(%s{namespace="%s",model_name="%s"}[1m]))`,
 		constants.VLLMKvCacheUsagePerc, escapePrometheusLabelValue(namespace), escapePrometheusLabelValue(modelID))
 
-	// Add timeout to prevent hanging on Prometheus issues (respects parent deadline)
-	queryCtx, cancel := contextWithRespectedDeadline(ctx, 5*time.Second)
+	// Add timeout to prevent hanging on Prometheus issues
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	result, warnings, err := utils.QueryPrometheusWithBackoff(queryCtx, cmc.promAPI, query)
@@ -240,8 +209,8 @@ func (cmc *SaturationMetricsCollector) queryQueueMetrics(
 	query := fmt.Sprintf(`max by (pod) (max_over_time(%s{namespace="%s",model_name="%s"}[1m]))`,
 		constants.VLLMNumRequestsWaiting, escapePrometheusLabelValue(namespace), escapePrometheusLabelValue(modelID))
 
-	// Add timeout to prevent hanging on Prometheus issues (respects parent deadline)
-	queryCtx, cancel := contextWithRespectedDeadline(ctx, 5*time.Second)
+	// Add timeout to prevent hanging on Prometheus issues
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	result, warnings, err := utils.QueryPrometheusWithBackoff(queryCtx, cmc.promAPI, query)
