@@ -19,6 +19,7 @@ package e2esaturation
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -854,9 +855,9 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 
 			By("verifying replica counts don't oscillate excessively for 3 minutes")
 			// Track min/max replicas seen during monitoring period
-			// Using large initial values that will be updated on first iteration
-			minA100, maxA100 := 1000, 0
-			minH100, maxH100 := 1000, 0
+			// Using math.MaxInt as sentinel value that will be replaced on first iteration
+			minA100, maxA100 := math.MaxInt, 0
+			minH100, maxH100 := math.MaxInt, 0
 			const maxAllowedRange = 2 // Replicas should not oscillate by more than 2
 
 			Consistently(func(g Gomega) {
