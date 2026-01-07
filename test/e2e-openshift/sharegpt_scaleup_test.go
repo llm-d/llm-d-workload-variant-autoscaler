@@ -19,6 +19,7 @@ package e2eopenshift
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -154,7 +155,8 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 				// Scale load workers proportionally to initial replicas
 				// Formula: scaledWorkers = baseLoadWorkers * initialReplicas / baseReplicas
 				// This ensures consistent load pressure per replica
-				scaledLoadWorkers = int(baseLoadWorkers * initialReplicas / baseReplicas)
+				// Use floating-point with explicit rounding to avoid integer division truncation
+				scaledLoadWorkers = int(math.Round(float64(baseLoadWorkers*initialReplicas) / float64(baseReplicas)))
 				if scaledLoadWorkers < 1 {
 					scaledLoadWorkers = 1 // Minimum 1 worker
 				}
