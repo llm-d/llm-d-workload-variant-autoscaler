@@ -795,9 +795,9 @@ jobs:
           make test-e2e-openshift
 
       - name: Cleanup infrastructure
-        # Only cleanup on success - leave resources for debugging on failure
+        # Cleanup on success or cancellation, but NOT on failure (preserve for debugging)
         # Use SKIP_CLEANUP=true to keep resources after successful runs
-        if: success() && env.SKIP_CLEANUP != 'true'
+        if: "!failure() && env.SKIP_CLEANUP != 'true'"
         run: |
           echo "Cleaning up ALL test infrastructure..."
           echo "  LLMD_NAMESPACE: $LLMD_NAMESPACE"
