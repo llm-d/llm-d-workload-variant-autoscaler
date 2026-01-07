@@ -56,6 +56,10 @@ export ACCELERATOR_TYPE="H100"              # Emulated GPU type
 export GATEWAY_PROVIDER="kgateway"          # Gateway for Kind (kgateway recommended)
 export ITL_AVERAGE_LATENCY_MS=20            # Average inter-token latency for the llm-d-inference-sim
 export TTFT_AVERAGE_LATENCY_MS=200          # Average time-to-first-token for the llm-d-inference-sim
+
+# Performance tuning (optional)
+export VLLM_MAX_NUM_SEQS=64                 # vLLM max concurrent sequences (batch size)
+export HPA_STABILIZATION_SECONDS=240        # HPA stabilization window
 ```
 
 **Deployment flags**:
@@ -97,6 +101,14 @@ make deploy-wva-emulated-on-kind
 **3. Deploy with llm-d (by default):**
 
 ```bash
+make deploy-wva-emulated-on-kind
+```
+
+**4. Testing configuration with fast saturation:**
+
+```bash
+export VLLM_MAX_NUM_SEQS=8              # Low batch size for easy saturation
+export HPA_STABILIZATION_SECONDS=30     # Fast scaling for testing
 make deploy-wva-emulated-on-kind
 ```
 

@@ -98,6 +98,15 @@ For a complete list of environment variables and configuration options, see the 
 ```bash
 export HF_TOKEN="hf_xxxxx"                  # Required: HuggingFace token
 export MODEL_ID="unsloth/Meta-Llama-3.1-8B" # Model to deploy
+export ACCELERATOR_TYPE="H100"              # GPU type
+export WVA_IMAGE_TAG="latest"               # WVA version
+export HPA_STABILIZATION_SECONDS=240        # HPA stabilization window
+
+# Performance tuning (optional)
+export VLLM_MAX_NUM_SEQS=64                 # vLLM max concurrent sequences (batch size)
+```
+
+For a complete list of all configuration options, see the [Configuration Reference](../README.md#configuration-reference) in the main deployment guide.
 export ACCELERATOR_TYPE="A100"              # GPU type (auto-detected)
 export GATEWAY_PROVIDER="istio"             # Gateway: istio or kgateway
 export BENCHMARK_MODE="true"                # Use Istio benchmark config
@@ -131,7 +140,17 @@ export MODEL_ID="meta-llama/Llama-2-7b-hf"
 make deploy-wva-on-k8s
 ```
 
-### Example 3: Deploy Only WVA (llm-d Already Deployed)
+### Example 3: E2E Testing Configuration
+
+```bash
+export HF_TOKEN="hf_xxxxx"
+export HPA_STABILIZATION_SECONDS=30  # Fast scaling for testing
+export VLLM_MAX_NUM_SEQS=8          # Low batch size for easy saturation
+export E2E_TESTS_ENABLED=true
+make deploy-wva-on-k8s
+```
+
+### Example 4: Deploy Only WVA (llm-d Already Deployed)
 
 ```bash
 export DEPLOY_WVA=true
@@ -143,7 +162,7 @@ export DEPLOY_HPA=false
 make deploy-wva-on-k8s
 ```
 
-### Example 4: Demo Mode (No GPUs Available)
+### Example 5: Demo Mode (No GPUs Available)
 
 ```bash
 export HF_TOKEN="hf_xxxxx"
@@ -151,7 +170,16 @@ export USE_VLLM_EMULATOR=true
 make deploy-wva-on-k8s
 ```
 
-### Example 5: Deploy with Different WVA Image
+### Example 6: Parameter Estimation Setup
+
+```bash
+export HF_TOKEN="hf_xxxxx"
+export MODEL_ID="unsloth/Meta-Llama-3.1-8B"
+export VLLM_MAX_NUM_SEQS=64         # Match desired max batch size
+make deploy-wva-on-k8s
+```
+
+### Example 7: Deploy with Different WVA Image
 
 ```bash
 export HF_TOKEN="hf_xxxxx"

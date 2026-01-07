@@ -98,6 +98,10 @@ export MODEL_ID="unsloth/Meta-Llama-3.1-8B" # Model to deploy
 export ACCELERATOR_TYPE="H100"              # GPU type (auto-detected)
 export GATEWAY_PROVIDER="istio"             # Gateway: istio or kgateway
 export BENCHMARK_MODE="true"                # Use Istio benchmark config
+
+# Performance tuning (optional)
+export VLLM_MAX_NUM_SEQS=64                 # vLLM max concurrent sequences (batch size)
+export HPA_STABILIZATION_SECONDS=240        # HPA stabilization window
 ```
 
 **Deployment flags** - Control which components to deploy:
@@ -128,7 +132,17 @@ export MODEL_ID="meta-llama/Llama-2-7b-hf"
 make deploy-wva-on-openshift
 ```
 
-### Example 3: Deploy Only WVA (llm-d Already Deployed)
+### Example 3: E2E Testing Configuration
+
+```bash
+export HF_TOKEN="hf_xxxxx"
+export HPA_STABILIZATION_SECONDS=30  # Fast scaling for testing
+export VLLM_MAX_NUM_SEQS=8          # Low batch size for easy saturation
+export E2E_TESTS_ENABLED=true
+make deploy-wva-on-openshift
+```
+
+### Example 4: Deploy Only WVA (llm-d Already Deployed)
 
 ```bash
 export DEPLOY_WVA=true
@@ -137,7 +151,16 @@ export DEPLOY_PROMETHEUS_ADAPTER=false
 make deploy-wva-on-openshift
 ```
 
-### Example 4: Re-run with Different GPU Type
+### Example 5: Parameter Estimation Setup
+
+```bash
+export HF_TOKEN="hf_xxxxx"
+export MODEL_ID="unsloth/Meta-Llama-3.1-8B"
+export VLLM_MAX_NUM_SEQS=64         # Match desired max batch size
+make deploy-wva-on-openshift
+```
+
+### Example 6: Re-run with Different GPU Type
 
 ```bash
 export HF_TOKEN="hf_xxxxx"

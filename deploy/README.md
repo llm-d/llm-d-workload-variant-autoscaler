@@ -226,7 +226,17 @@ make deploy-wva-on-k8s
 ```bash
 export HF_TOKEN="hf_xxxxx"
 export HPA_STABILIZATION_SECONDS=0   # Immediate scaling for e2e tests
+export VLLM_MAX_NUM_SEQS=8          # Low batch size for easy saturation
 export E2E_TESTS_ENABLED=true
+make deploy-wva-on-k8s
+```
+
+##### Example 6: Parameter estimation with specific batch size
+
+```bash
+export HF_TOKEN="hf_xxxxx"
+export VLLM_MAX_NUM_SEQS=64         # Match desired max batch size
+export MODEL_ID="unsloth/Meta-Llama-3.1-8B"
 make deploy-wva-on-k8s
 ```
 ```
@@ -673,6 +683,27 @@ HPA_STABILIZATION_SECONDS=30 ./deploy/install.sh
 | `VLLM_SVC_ENABLED` | Enable vLLM Service | `true` |
 | `VLLM_SVC_NODEPORT` | vLLM NodePort | `30000` |
 | `LLM_D_RELEASE` | llm-d version | `v0.3.0` |
+| `VLLM_MAX_NUM_SEQS` | vLLM max concurrent sequences per replica | (unset - uses vLLM default) |
+
+**vLLM Performance Tuning:**
+
+The `VLLM_MAX_NUM_SEQS` variable controls the maximum number of concurrent sequences (batch size) that each vLLM replica can handle. Lower values make the server easier to saturate, which is useful for testing autoscaling behavior.
+
+**Use cases:**
+- **E2E Testing**: Set to low values (e.g., `8` or `16`) to quickly trigger saturation and test autoscaling
+- **Parameter Estimation**: Match this to your desired maximum batch size (see [Parameter Estimation Guide](../docs/tutorials/parameter-estimation.md))
+- **Production**: Leave unset to use vLLM's default based on available GPU memory
+
+**Example:**
+```bash
+# E2E testing with easy saturation
+export VLLM_MAX_NUM_SEQS=8
+make deploy-wva-on-k8s
+
+# Parameter estimation with batch size 64
+export VLLM_MAX_NUM_SEQS=64
+make deploy-wva-on-k8s
+```
 
 ### Helm Values Reference
 
@@ -756,6 +787,23 @@ kubectl describe variantautoscaling <name> -n <namespace>
 ```
 
 ### Testing Autoscaling
+
+#### Quick Testing with Low Batch Size
+
+For rapid testing of autoscaling behavior, configure vLLM with a low `max-num-seqs` value to make the server easy to saturate:
+
+```bash
+# Deploy with testing-friendly configuration
+export VLLM_MAX_NUM_SEQS=8              # Low batch size triggers saturation quickly
+export HPA_STABILIZATION_SECONDS=30     # Fast scaling for testing
+make deploy-wva-on-k8s  # or -on-openshift, -emulated-on-kind
+```
+
+This configuration helps you:
+- Quickly verify autoscaling behavior without heavy load
+- Test WVA's saturation detection
+- Validate HPA integration
+- Debug scaling issues faster
 
 **Generate load**:
 
