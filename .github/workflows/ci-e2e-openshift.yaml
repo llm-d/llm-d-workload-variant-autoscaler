@@ -831,9 +831,10 @@ jobs:
           echo "Deleting WVA namespace $WVA_NAMESPACE..."
           kubectl delete namespace "$WVA_NAMESPACE" --ignore-not-found --timeout=120s || true
 
-          # Clean up cluster-scoped WVA resources
-          echo "Removing cluster-scoped WVA resources..."
-          kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/name=workload-variant-autoscaler --ignore-not-found || true
+          # Clean up cluster-scoped WVA resources for THIS release only
+          # Use both name and instance labels to avoid deleting resources from other PRs
+          echo "Removing cluster-scoped WVA resources for release $WVA_RELEASE_NAME..."
+          kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/name=workload-variant-autoscaler,app.kubernetes.io/instance="$WVA_RELEASE_NAME" --ignore-not-found || true
 
           echo "Cleanup complete"
 
