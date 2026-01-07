@@ -8,6 +8,12 @@ Helm chart for Workload-Variant-Autoscaler (WVA) - GPU-aware autoscaler for LLM 
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| hpa.behavior.scaleDown.policies | list | `[{"periodSeconds":150,"type":"Pods","value":10}]` | Scale-down policies |
+| hpa.behavior.scaleDown.selectPolicy | string | `"Max"` | Scale-down policy selection |
+| hpa.behavior.scaleDown.stabilizationWindowSeconds | int | `240` | Scale-down stabilization window |
+| hpa.behavior.scaleUp.policies | list | `[{"periodSeconds":150,"type":"Pods","value":10}]` | Scale-up policies |
+| hpa.behavior.scaleUp.selectPolicy | string | `"Max"` | Scale-up policy selection |
+| hpa.behavior.scaleUp.stabilizationWindowSeconds | int | `240` | Scale-up stabilization window |
 | hpa.enabled | bool | `true` |  |
 | hpa.maxReplicas | int | `10` |  |
 | hpa.targetAverageValue | string | `"1"` |  |
@@ -136,6 +142,64 @@ wva:
 ```
 
 See `docs/saturation-scaling-config.md` for detailed configuration documentation.
+
+### HPA Behavior Configuration
+
+The chart provides full control over HPA scaling behavior through the `hpa.behavior` section. This allows you to configure stabilization windows and scaling policies without post-deployment patching.
+
+**Default Configuration:**
+```yaml
+hpa:
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 240  # Wait 240s before scaling up
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 10
+          periodSeconds: 150
+    scaleDown:
+      stabilizationWindowSeconds: 240  # Wait 240s before scaling down
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 10
+          periodSeconds: 150
+```
+
+**Configuration via Helm:**
+```bash
+# Production: Conservative scaling (240s stabilization)
+helm install workload-variant-autoscaler ./workload-variant-autoscaler \
+  --set hpa.behavior.scaleUp.stabilizationWindowSeconds=240 \
+  --set hpa.behavior.scaleDown.stabilizationWindowSeconds=240
+
+# E2E Testing: Fast scaling (30s stabilization)
+helm install workload-variant-autoscaler ./workload-variant-autoscaler \
+  --set hpa.behavior.scaleUp.stabilizationWindowSeconds=30 \
+  --set hpa.behavior.scaleDown.stabilizationWindowSeconds=30
+```
+
+**Configuration via install.sh:**
+```bash
+# Set stabilization window via environment variable
+HPA_STABILIZATION_SECONDS=120 ./deploy/install.sh
+
+# Production default (240s)
+./deploy/install.sh
+```
+
+**Key Parameters:**
+- **stabilizationWindowSeconds**: Time to wait before applying scaling decisions (prevents flapping)
+- **selectPolicy**: How to choose from multiple policies (`Max`, `Min`, `Disabled`)
+- **policies**: List of scaling policies defining rate limits
+
+**Best Practices:**
+- **Production**: Use 120-300 seconds for stability
+- **Development**: Use 30-60 seconds for faster iteration
+- **E2E Tests**: Use 30 seconds for rapid validation
+
+See [HPA Integration Guide](../../docs/integrations/hpa-integration.md) for detailed information.
 
 ### Usage Examples
 

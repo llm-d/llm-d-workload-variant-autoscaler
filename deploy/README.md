@@ -142,6 +142,9 @@ export DEPLOY_PROMETHEUS_ADAPTER=true       # Deploy Prometheus Adapter
 export DEPLOY_VA=true                       # Deploy VariantAutoscaling CR
 export DEPLOY_HPA=true                      # Deploy HPA
 
+# HPA Configuration
+export HPA_STABILIZATION_SECONDS=240        # HPA stabilization window (default: 240s)
+
 # Gateway Configuration
 export GATEWAY_PROVIDER="istio"             # Gateway provider: istio, kgateway
 export INSTALL_GATEWAY_CTRLPLANE="true"     # Install gateway control plane
@@ -208,6 +211,24 @@ export DEPLOY_PROMETHEUS=true  # Prometheus is needed for metrics - disable if i
 export DEPLOY_PROMETHEUS_ADAPTER=false
 export DEPLOY_HPA=false
 make deploy-wva-on-k8s
+```
+
+##### Example 4: Fast HPA scaling for development/testing
+
+```bash
+export HF_TOKEN="hf_xxxxx"
+export HPA_STABILIZATION_SECONDS=30  # Fast scaling for dev/test (default: 240)
+make deploy-wva-on-k8s
+```
+
+##### Example 5: E2E testing with very fast scaling
+
+```bash
+export HF_TOKEN="hf_xxxxx"
+export HPA_STABILIZATION_SECONDS=0   # Immediate scaling for e2e tests
+export E2E_TESTS_ENABLED=true
+make deploy-wva-on-k8s
+```
 ```
 
 ### Method 2: Helm Chart
@@ -309,6 +330,23 @@ hpa:
   enabled: true           # Create HPA resource
   maxReplicas: 10        # Maximum number of replicas
   targetAverageValue: "1" # Target value for external metric
+  
+  # Scaling behavior configuration
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 240  # Wait 240s before scaling up (production default)
+      selectPolicy: Max                # Use maximum scale from policies
+      policies:
+        - type: Pods
+          value: 10                    # Scale up by max 10 pods
+          periodSeconds: 150           # Per 150 second period
+    scaleDown:
+      stabilizationWindowSeconds: 240  # Wait 240s before scaling down (production default)
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 10                    # Scale down by max 10 pods
+          periodSeconds: 150           # Per 150 second period
 
 # vLLM Service Configuration
 vllmService:
@@ -602,6 +640,29 @@ Each guide includes platform-specific examples, troubleshooting, and quick start
 | `DEPLOY_VA` | Deploy VariantAutoscaling CR | `true` |
 | `DEPLOY_HPA` | Deploy HPA | `true` |
 | `SKIP_CHECKS` | Skip prerequisite checks | `false` |
+
+#### HPA Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HPA_STABILIZATION_SECONDS` | HPA stabilization window in seconds | `240` |
+
+**Best Practices:**
+- **Production**: 120-300 seconds (prevents flapping, ensures stability)
+- **Development**: 30-60 seconds (faster iteration)
+- **E2E Tests**: 0-30 seconds (rapid validation)
+
+**Examples:**
+```bash
+# Production deployment (default)
+HPA_STABILIZATION_SECONDS=240 ./deploy/install.sh
+
+# Development deployment
+HPA_STABILIZATION_SECONDS=60 ./deploy/install.sh
+
+# E2E testing
+HPA_STABILIZATION_SECONDS=30 ./deploy/install.sh
+```
 
 #### Advanced Configuration
 

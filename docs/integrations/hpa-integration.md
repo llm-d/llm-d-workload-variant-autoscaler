@@ -271,6 +271,122 @@ For this discussion, please refer to the [community doc](https://docs.google.com
 
 ## Configuration Files
 
+### HPA Behavior Configuration
+
+HPA behavior (stabilization windows and scaling policies) can be configured at deployment time through Helm values, eliminating the need for post-deployment patching.
+
+#### Via Helm Chart
+
+The WVA Helm chart includes a fully configurable `hpa.behavior` section:
+
+**Production Configuration (Default):**
+```yaml
+hpa:
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 240  # Wait 4 minutes before scaling up
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 10
+          periodSeconds: 150
+    scaleDown:
+      stabilizationWindowSeconds: 240  # Wait 4 minutes before scaling down
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 10
+          periodSeconds: 150
+```
+
+**Deployment Examples:**
+
+```bash
+# Production: Conservative scaling (240s stabilization)
+helm install workload-variant-autoscaler ./charts/workload-variant-autoscaler \
+  --set hpa.behavior.scaleUp.stabilizationWindowSeconds=240 \
+  --set hpa.behavior.scaleDown.stabilizationWindowSeconds=240
+
+# Development: Fast scaling (30s stabilization)
+helm install workload-variant-autoscaler ./charts/workload-variant-autoscaler \
+  --set hpa.behavior.scaleUp.stabilizationWindowSeconds=30 \
+  --set hpa.behavior.scaleDown.stabilizationWindowSeconds=30
+
+# E2E Testing: Very fast scaling (0s stabilization)
+helm install workload-variant-autoscaler ./charts/workload-variant-autoscaler \
+  --set hpa.behavior.scaleUp.stabilizationWindowSeconds=0 \
+  --set hpa.behavior.scaleDown.stabilizationWindowSeconds=0
+```
+
+#### Via Deployment Script
+
+The `deploy/install.sh` script supports the `HPA_STABILIZATION_SECONDS` environment variable:
+
+```bash
+# Custom stabilization window
+HPA_STABILIZATION_SECONDS=120 ./deploy/install.sh
+
+# Production default (240 seconds)
+./deploy/install.sh
+
+# E2E testing (30 seconds)
+HPA_STABILIZATION_SECONDS=30 ./deploy/install.sh
+```
+
+#### Via values.yaml
+
+For persistent configuration, edit `values.yaml`:
+
+```yaml
+hpa:
+  enabled: true
+  maxReplicas: 10
+  targetAverageValue: "1"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 180  # Your custom value
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 10
+          periodSeconds: 150
+    scaleDown:
+      stabilizationWindowSeconds: 180  # Your custom value
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 10
+          periodSeconds: 150
+```
+
+#### Best Practices
+
+| Environment | Stabilization Window | Rationale |
+|-------------|---------------------|-----------|
+| **Production** | 120-300s | Prevents flapping, ensures stability |
+| **Staging** | 60-120s | Balance between stability and responsiveness |
+| **Development** | 30-60s | Faster iteration, acceptable for dev/test |
+| **E2E Tests** | 0-30s | Rapid validation, acceptable for automated tests |
+
+**Key Parameters:**
+
+- **stabilizationWindowSeconds**: Time HPA waits before applying scaling decisions
+  - Higher values = more stable (prevents flapping)
+  - Lower values = more responsive (faster scaling)
+  
+- **selectPolicy**: How to choose from multiple policies
+  - `Max`: Maximum scale allowed by any policy (most aggressive)
+  - `Min`: Minimum scale allowed by any policy (most conservative)
+  - `Disabled`: Disable scaling in that direction
+
+- **policies**: List of rate-limiting policies
+  - `type: Pods`: Absolute number of pods per period
+  - `type: Percent`: Percentage of current pods per period
+  - `value`: Amount to scale
+  - `periodSeconds`: Time window for the policy
+
+**Important:** The example below shows testing configuration with `stabilizationWindowSeconds: 0`. For production deployments, use the Helm chart's configurable behavior settings as described above.
+
 ### Prometheus Adapter Values (`config/samples/prometheus-adapter-values.yaml`)
 
 ```yaml
