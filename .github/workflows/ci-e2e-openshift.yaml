@@ -321,6 +321,8 @@ jobs:
       MAX_NUM_SEQS: ${{ github.event.inputs.max_num_seqs || '1' }}
       HPA_STABILIZATION_SECONDS: ${{ github.event.inputs.hpa_stabilization_seconds || '30' }}
       SKIP_CLEANUP: ${{ github.event.inputs.skip_cleanup || 'false' }}
+      # Use main branch of llm-d/llm-d for inferencepool chart v1.2.1 (GA API support)
+      LLM_D_RELEASE: main
       # PR-specific namespaces for isolation between concurrent PR tests
       # Primary llm-d namespace (Model A1 + A2)
       LLMD_NAMESPACE: llm-d-inference-scheduler-pr-${{ needs.gate.outputs.pr_number || github.run_id }}
@@ -586,125 +588,6 @@ jobs:
           echo ""
           echo "=== WVA Controller ($WVA_NAMESPACE) ==="
           kubectl get pods -n "$WVA_NAMESPACE"
-
-      - name: Fix InferencePool API for Istio 1.28+ compatibility
-        run: |
-          # Istio 1.28+ supports inference.networking.k8s.io (GA) but NOT
-          # inference.networking.x-k8s.io (experimental). The GAIE chart deploys
-          # with the experimental API, so we need to create GA versions and patch
-          # HTTPRoutes and EPP deployments to use them.
-
-          echo "Fixing InferencePool API groups for Istio compatibility..."
-
-          fix_namespace() {
-            local ns=$1
-            echo ""
-            echo "=== Fixing namespace: $ns ==="
-
-            # 1. Create InferencePool with GA API
-            echo "Creating GA InferencePool..."
-            cat <<EOF | kubectl apply -f -
-          apiVersion: inference.networking.k8s.io/v1
-          kind: InferencePool
-          metadata:
-            name: gaie-inference-scheduling
-            namespace: $ns
-          spec:
-            endpointPickerRef:
-              failureMode: FailClose
-              group: ""
-              kind: Service
-              name: gaie-inference-scheduling-epp
-              port:
-                number: 9002
-            selector:
-              matchLabels:
-                llm-d.ai/inferenceServing: "true"
-            targetPorts:
-            - number: 8000
-          EOF
-
-            # 2. Patch HTTPRoute to reference GA API group
-            echo "Patching HTTPRoute to use GA API group..."
-            kubectl patch httproute llm-d-inference-scheduling -n $ns --type=json -p='[
-              {"op": "replace", "path": "/spec/rules/0/backendRefs/0/group", "value": "inference.networking.k8s.io"}
-            ]'
-
-            # 3. Patch EPP deployment to use GA pool-group
-            echo "Patching EPP deployment args..."
-            kubectl patch deployment gaie-inference-scheduling-epp -n $ns --type=json -p="[
-              {\"op\": \"replace\", \"path\": \"/spec/template/spec/containers/0/args\", \"value\": [
-                \"--pool-name\", \"gaie-inference-scheduling\",
-                \"--pool-namespace\", \"$ns\",
-                \"--pool-group\", \"inference.networking.k8s.io\",
-                \"--zap-encoder\", \"json\",
-                \"--config-file\", \"/config/default-plugins.yaml\",
-                \"--v\", \"1\"
-              ]}
-            ]"
-
-            # 4. Create RBAC for EPP to access GA InferencePool
-            echo "Creating RBAC for GA InferencePool access..."
-            cat <<EOF | kubectl apply -f -
-          apiVersion: rbac.authorization.k8s.io/v1
-          kind: Role
-          metadata:
-            name: inference-pool-reader
-            namespace: $ns
-          rules:
-          - apiGroups: ["inference.networking.k8s.io"]
-            resources: ["inferencepools"]
-            verbs: ["get", "list", "watch"]
-          ---
-          apiVersion: rbac.authorization.k8s.io/v1
-          kind: RoleBinding
-          metadata:
-            name: epp-inference-pool-reader
-            namespace: $ns
-          subjects:
-          - kind: ServiceAccount
-            name: gaie-inference-scheduling-epp
-            namespace: $ns
-          roleRef:
-            kind: Role
-            name: inference-pool-reader
-            apiGroup: rbac.authorization.k8s.io
-          EOF
-
-            # Wait for EPP to restart
-            echo "Waiting for EPP to restart..."
-            kubectl rollout status deployment/gaie-inference-scheduling-epp -n $ns --timeout=60s || true
-          }
-
-          # Fix both namespaces
-          fix_namespace "$LLMD_NAMESPACE"
-          fix_namespace "$LLMD_NAMESPACE_B"
-
-          # Verify fixes
-          echo ""
-          echo "=== Verifying HTTPRoute status ==="
-          for ns in "$LLMD_NAMESPACE" "$LLMD_NAMESPACE_B"; do
-            echo "Namespace: $ns"
-            kubectl get httproute -n $ns -o jsonpath='{.items[0].status.parents[0].conditions[?(@.type=="ResolvedRefs")].message}'
-            echo ""
-          done
-
-      - name: Restart gateways to ensure ext_proc config is applied
-        run: |
-          # After InferencePool and EPP are configured, the Istio gateway may not
-          # immediately pick up the correct ext_proc configuration. Restarting the
-          # gateway pods forces Istiod to push the correct config.
-          echo "Restarting Istio gateways to ensure ext_proc configuration is applied..."
-
-          for ns in "$LLMD_NAMESPACE" "$LLMD_NAMESPACE_B"; do
-            echo ""
-            echo "=== Restarting gateway in $ns ==="
-            kubectl rollout restart deployment/infra-inference-scheduling-inference-gateway-istio -n "$ns"
-            kubectl rollout status deployment/infra-inference-scheduling-inference-gateway-istio -n "$ns" --timeout=120s
-          done
-
-          echo ""
-          echo "All gateways restarted successfully"
 
       - name: Install Go dependencies
         run: go mod download
