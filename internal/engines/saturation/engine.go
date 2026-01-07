@@ -38,10 +38,9 @@ import (
 	collectorv2 "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/v2"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/common"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/executor"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/limiter"
 	saturationmetrics "github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/saturation/metrics"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
-
-	// "github.com/llm-d-incubation/workload-variant-autoscaler/internal/limiter"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/logging"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/saturation"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils"
@@ -138,8 +137,9 @@ func (e *Engine) optimize(ctx context.Context) error {
 	}
 
 	// Collected accelerator inventory (only in limited mode)
+	inventory := map[string]map[string]collector.AcceleratorModelInfo{}
 	if strings.EqualFold(os.Getenv("WVA_LIMITED_MODE"), "true") {
-		inventory, err := collector.CollectInventoryK8S(ctx, e.client)
+		inventory, err = collector.CollectInventoryK8S(ctx, e.client)
 		if err != nil {
 			logger.Error(err, "Failed to collect cluster inventory")
 			// do not proceed to optimization if inventory collection fails in limited mode
@@ -214,6 +214,14 @@ func (e *Engine) optimize(ctx context.Context) error {
 			// If saturationAnalysis is nil (e.g. no metrics), we just skip this model
 			logger.V(logging.DEBUG).Info("Skipping decision application for model: saturation analysis is nil (likely no metrics)",
 				"modelID", modelID)
+		}
+	}
+
+	// apply limited mode saturation decisions
+	if strings.EqualFold(os.Getenv("WVA_LIMITED_MODE"), "true") {
+		limiterCapacityAllocator := limiter.NewLimitedCapacityAllocator(nil)
+		if err = limiterCapacityAllocator.Allocate(ctx, &allDecisions, vaMap, inventory); err != nil {
+			return err
 		}
 	}
 
@@ -591,12 +599,6 @@ func (e *Engine) CollectMetricsForSaturationMode(
 
 	return nil
 }
-
-// apply limited mode saturation decisions
-// limiterCapacityAllocator := limiter.NewLimitedCapacityAllocator(nil)
-// if err = limiterCapacityAllocator.Allocate(ctx, &allDecisions, vaMap, inventory); err != nil {
-// 	return err
-// }
 
 // applySaturationDecisions updates VA status and emits metrics based on Saturation decisions.
 func (e *Engine) applySaturationDecisions(
