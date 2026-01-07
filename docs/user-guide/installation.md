@@ -168,7 +168,7 @@ make uninstall  # Remove CRDs
 
 **See Also:**
 - [Configuration Guide](configuration.md)
-- [Troubleshooting Guide](troubleshooting.md) (coming soon)
+- [Troubleshooting Guide](troubleshooting.md)
 - [Developer Guide](../developer-guide/development.md)
 
 ## Next Steps
