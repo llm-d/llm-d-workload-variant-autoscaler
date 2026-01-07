@@ -1,0 +1,75 @@
+# Assigns documentation PRs created by the Update Docs workflow
+# to the AUTHOR (not merger) of the original PR that triggered the docs update
+name: Assign Docs PR to Original Author
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  assign-to-original-author:
+    # Only run for PRs created by github-actions bot (from Update Docs workflow)
+    if: github.actor == 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get original PR author
+        id: get_author
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "PR created by bot, finding original PR author..."
+
+          # Get the base branch (usually main)
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          echo "Base branch: $BASE_BRANCH"
+
+          # Get the most recent commit on the base branch
+          TRIGGER_SHA=$(gh api repos/${{ github.repository }}/commits \
+            --jq '.[0].sha' \
+            -F sha="$BASE_BRANCH" \
+            -F per_page=1)
+          echo "Triggering commit: $TRIGGER_SHA"
+
+          # Find the PR that was merged with this commit and get its AUTHOR
+          PR_AUTHOR=$(gh api repos/${{ github.repository }}/commits/$TRIGGER_SHA/pulls \
+            --jq '.[0].user.login' 2>/dev/null || echo "")
+
+          if [ -n "$PR_AUTHOR" ] && [ "$PR_AUTHOR" != "null" ]; then
+            echo "Found original PR author: $PR_AUTHOR"
+            echo "author=$PR_AUTHOR" >> $GITHUB_OUTPUT
+          else
+            echo "No associated PR found, skipping assignment"
+            echo "author=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Assign PR to original author
+        if: steps.get_author.outputs.author != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          AUTHOR="${{ steps.get_author.outputs.author }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          echo "Assigning PR #$PR_NUMBER to $AUTHOR (original PR author)"
+
+          gh pr edit "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --add-assignee "$AUTHOR"
+
+          echo "Successfully assigned PR #$PR_NUMBER to $AUTHOR"
+
+      - name: Add comment with attribution
+        if: steps.get_author.outputs.author != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          AUTHOR="${{ steps.get_author.outputs.author }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body "This documentation update was triggered by changes from @$AUTHOR. Assigning for review."
