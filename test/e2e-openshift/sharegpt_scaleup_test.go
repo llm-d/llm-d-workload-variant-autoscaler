@@ -54,8 +54,12 @@ func sanitizeK8sName(name string) string {
 var lowLoad = numPrompts <= 2000 && requestRate <= 8
 
 // Load generation configuration constants
+// Note: baseLoadWorkers is tuned for 2 replicas. The actual number of workers
+// is scaled proportionally to initialReplicas to ensure consistent load pressure
+// per replica and prevent excessive scaling on clusters with limited GPUs.
 const (
-	numLoadWorkers     = 10    // Number of parallel load generation workers
+	baseLoadWorkers    = 10    // Base number of workers (tuned for 2 replicas)
+	baseReplicas       = 2     // The replica count baseLoadWorkers is tuned for
 	requestsPerWorker  = 500   // Requests each worker sends
 	batchSize          = 50    // Concurrent requests per batch
 	curlTimeoutSeconds = 180   // Timeout for each curl request (increased for longer outputs)
@@ -125,6 +129,7 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 				vaName               string
 				scaledReplicas       int32
 				scaledOptimized      int32
+				scaledLoadWorkers    int    // Load workers scaled to initial replicas
 				jobCompletionTimeout = 10 * time.Minute
 			)
 
@@ -143,7 +148,18 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 				deploy, err := k8sClient.AppsV1().Deployments(model.namespace).Get(ctx, model.deployment, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred(), "Should be able to get vLLM deployment")
 				initialReplicas = deploy.Status.ReadyReplicas
+				if initialReplicas == 0 {
+					initialReplicas = 1 // Avoid division issues, treat 0 as 1
+				}
+				// Scale load workers proportionally to initial replicas
+				// Formula: scaledWorkers = baseLoadWorkers * initialReplicas / baseReplicas
+				// This ensures consistent load pressure per replica
+				scaledLoadWorkers = int(baseLoadWorkers * initialReplicas / baseReplicas)
+				if scaledLoadWorkers < 1 {
+					scaledLoadWorkers = 1 // Minimum 1 worker
+				}
 				_, _ = fmt.Fprintf(GinkgoWriter, "Initial ready replicas: %d\n", initialReplicas)
+				_, _ = fmt.Fprintf(GinkgoWriter, "Scaled load workers: %d (base: %d for %d replicas)\n", scaledLoadWorkers, baseLoadWorkers, baseReplicas)
 
 				// Get HPA first to know minReplicas for VA stabilization check
 				By("verifying HPA exists and getting minReplicas")
@@ -238,7 +254,7 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 
 			It("should create and run parallel load generation jobs", func() {
 				By("cleaning up any existing jobs")
-				deleteParallelLoadJobs(ctx, jobBaseName, model.namespace, numLoadWorkers)
+				deleteParallelLoadJobs(ctx, jobBaseName, model.namespace, scaledLoadWorkers)
 				time.Sleep(2 * time.Second)
 
 				By("waiting for gateway endpoints to exist")
@@ -330,8 +346,8 @@ exit 1`,
 					})
 				time.Sleep(2 * time.Second)
 
-				By(fmt.Sprintf("creating %d parallel load generation jobs targeting gateway", numLoadWorkers))
-				loadErr := createParallelLoadJobsForModel(ctx, jobBaseName, model.namespace, model.gatewayService, numLoadWorkers, requestsPerWorker)
+				By(fmt.Sprintf("creating %d parallel load generation jobs targeting gateway", scaledLoadWorkers))
+				loadErr := createParallelLoadJobsForModel(ctx, jobBaseName, model.namespace, model.gatewayService, scaledLoadWorkers, requestsPerWorker)
 				Expect(loadErr).NotTo(HaveOccurred(), "Should be able to create load generation jobs")
 
 				By("waiting for job pods to be running")
@@ -340,7 +356,7 @@ exit 1`,
 						LabelSelector: fmt.Sprintf("experiment=%s", jobBaseName),
 					})
 					g.Expect(err).NotTo(HaveOccurred(), "Should be able to list job pods")
-					g.Expect(len(podList.Items)).To(BeNumerically(">=", numLoadWorkers), "All job pods should exist")
+					g.Expect(len(podList.Items)).To(BeNumerically(">=", scaledLoadWorkers), "All job pods should exist")
 
 					runningCount := 0
 					for _, pod := range podList.Items {
@@ -348,11 +364,11 @@ exit 1`,
 							runningCount++
 						}
 					}
-					g.Expect(runningCount).To(BeNumerically(">=", numLoadWorkers),
-						fmt.Sprintf("At least %d job pods should be running, got %d", numLoadWorkers, runningCount))
+					g.Expect(runningCount).To(BeNumerically(">=", scaledLoadWorkers),
+						fmt.Sprintf("At least %d job pods should be running, got %d", scaledLoadWorkers, runningCount))
 				}, 3*time.Minute, 5*time.Second).Should(Succeed())
 
-				_, _ = fmt.Fprintf(GinkgoWriter, "All %d load generation jobs are running\n", numLoadWorkers)
+				_, _ = fmt.Fprintf(GinkgoWriter, "All %d load generation jobs are running\n", scaledLoadWorkers)
 			})
 
 			It("should detect increased load and trigger scale-up", func() {
@@ -397,7 +413,7 @@ exit 1`,
 						// After 6 iterations (60s) with zero arrival rate, log load gen jobs
 						if zeroArrivalCount >= 6 && !loadGenLogsShown {
 							loadGenLogsShown = true
-							logLoadGenJobLogs(ctx, jobBaseName, model.namespace, numLoadWorkers)
+							logLoadGenJobLogs(ctx, jobBaseName, model.namespace, scaledLoadWorkers)
 						}
 					} else {
 						zeroArrivalCount = 0 // Reset counter when we see traffic
@@ -469,7 +485,7 @@ exit 1`,
 				By("waiting for jobs to complete")
 				Eventually(func(g Gomega) {
 					succeededCount := 0
-					for i := 1; i <= numLoadWorkers; i++ {
+					for i := 1; i <= scaledLoadWorkers; i++ {
 						jobName := fmt.Sprintf("%s-%d", jobBaseName, i)
 						job, err := k8sClient.BatchV1().Jobs(model.namespace).Get(ctx, jobName, metav1.GetOptions{})
 						if err != nil {
@@ -479,9 +495,9 @@ exit 1`,
 							succeededCount++
 						}
 					}
-					_, _ = fmt.Fprintf(GinkgoWriter, "Jobs completed: %d / %d\n", succeededCount, numLoadWorkers)
-					g.Expect(succeededCount).To(BeNumerically(">=", numLoadWorkers),
-						fmt.Sprintf("All %d jobs should have succeeded, got %d", numLoadWorkers, succeededCount))
+					_, _ = fmt.Fprintf(GinkgoWriter, "Jobs completed: %d / %d\n", succeededCount, scaledLoadWorkers)
+					g.Expect(succeededCount).To(BeNumerically(">=", scaledLoadWorkers),
+						fmt.Sprintf("All %d jobs should have succeeded, got %d", scaledLoadWorkers, succeededCount))
 				}, jobCompletionTimeout, 15*time.Second).Should(Succeed())
 
 				_, _ = fmt.Fprintf(GinkgoWriter, "All load generation jobs completed successfully\n")
@@ -489,7 +505,7 @@ exit 1`,
 
 			AfterAll(func() {
 				By("cleaning up load generation jobs")
-				deleteParallelLoadJobs(ctx, jobBaseName, model.namespace, numLoadWorkers)
+				deleteParallelLoadJobs(ctx, jobBaseName, model.namespace, scaledLoadWorkers)
 
 				_, _ = fmt.Fprintf(GinkgoWriter, "\n========================================\n")
 				_, _ = fmt.Fprintf(GinkgoWriter, "%s test completed - scaled from %d to %d replicas\n", model.name, initialReplicas, scaledReplicas)
