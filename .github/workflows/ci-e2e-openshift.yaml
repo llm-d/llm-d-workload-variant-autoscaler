@@ -15,13 +15,15 @@ permissions:
 # - Regular comments (not /ok-to-test or /retest): unique group prevents cancellation of real tests
 # - Valid triggers: group 'e2e-openshift-{pr_number}' (can cancel previous runs for same PR)
 # - Fallback chain for ID: pull_request.number -> issue.number -> run_id
+#
+# NOTE: Valid command list (/ok-to-test, /retest) must stay in sync with gate job validation (line ~125)
 concurrency:
   group: >-
     ${{
       github.event_name == 'issue_comment' &&
       !contains(github.event.comment.body, '/ok-to-test') &&
       !contains(github.event.comment.body, '/retest')
-      && format('comment-skip-{0}', github.run_id)
+      && format('comment-isolated-{0}', github.run_id)
       || format('e2e-openshift-{0}',
            github.event.pull_request.number
            || github.event.issue.number
