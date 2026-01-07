@@ -797,7 +797,7 @@ jobs:
       - name: Cleanup infrastructure
         # Cleanup on success or cancellation, but NOT on failure (preserve for debugging)
         # Use SKIP_CLEANUP=true to keep resources after successful runs
-        if: "!failure() && env.SKIP_CLEANUP != 'true'"
+        if: "(success() || cancelled()) && env.SKIP_CLEANUP != 'true'"
         run: |
           echo "Cleaning up ALL test infrastructure..."
           echo "  LLMD_NAMESPACE: $LLMD_NAMESPACE"
