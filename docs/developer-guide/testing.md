@@ -253,6 +253,10 @@ REQUEST_RATE=20        # Requests per second
 NUM_PROMPTS=3000       # Total prompts to generate
 ```
 
+Additional load generation constants are configured in the test code:
+- **`maxTokens=400`**: Token limit for completion requests (sustains GPU load for reliable scale-up detection)
+- **`curlTimeoutSeconds=180`**: Request timeout (accommodates longer response times with higher token limits)
+
 See the [OpenShift E2E Tests README](../../test/e2e-openshift/README.md) for comprehensive documentation.
 
 ## Test Comparison Matrix

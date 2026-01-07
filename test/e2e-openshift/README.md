@@ -165,7 +165,34 @@ go test ./test/e2e-openshift/... -v -ginkgo.v -timeout 45m
 
 ## Test Parameters
 
-You can modify the load generation parameters in `sharegpt_scaleup_test.go`:
+### Load Generation Configuration
+
+The test uses configurable constants defined in `sharegpt_scaleup_test.go`:
+
+```go
+const (
+    numLoadWorkers     = 10    // Number of parallel load generation workers
+    requestsPerWorker  = 500   // Requests each worker sends
+    batchSize          = 50    // Concurrent requests per batch
+    curlTimeoutSeconds = 180   // Timeout for each curl request
+    maxTokens          = 400   // Max tokens for completion requests
+    batchSleepDuration = "0.1" // Sleep duration between batches to control rate
+)
+```
+
+#### Key Configuration Details
+
+- **`maxTokens` (400)**: Increased from 150 to generate longer outputs that keep the GPU KV cache occupied longer. This ensures the saturation engine detects load and triggers scale-up reliably, especially with fast GPUs like A100s where shorter outputs may complete before metrics are collected.
+
+- **`curlTimeoutSeconds` (180)**: Increased from 120s to accommodate the longer response times resulting from increased `maxTokens`.
+
+- **`numLoadWorkers` (10)**: Number of parallel load generation workers that run concurrently to simulate realistic traffic patterns.
+
+- **`batchSize` (50)**: Number of concurrent requests sent per batch by each worker, controlling burst characteristics.
+
+### Modifying Test Parameters
+
+You can modify the load generation parameters by editing the function call in `sharegpt_scaleup_test.go`:
 
 ```go
 job := createShareGPTJob(jobName, llmDNamespace, 20, 3000)
@@ -175,11 +202,13 @@ job := createShareGPTJob(jobName, llmDNamespace, 20, 3000)
 //                                               +-------- Request rate (req/s)
 ```
 
-### Recommended Parameters
+### Recommended Load Profiles
 
 - **Light load** (should stay at 1 replica): `requestRate: 8, numPrompts: 2000`
 - **Medium load** (should scale to 2 replicas): `requestRate: 20, numPrompts: 3000`
 - **Heavy load** (may scale to 3+ replicas): `requestRate: 40, numPrompts: 5000`
+
+> **Note**: The `maxTokens` and `curlTimeoutSeconds` constants are tuned for reliable scale-up detection with A100 GPUs. If testing with different GPU types or model configurations, you may need to adjust these values to ensure load is sustained long enough for the saturation engine to detect and recommend scaling.
 
 ## Expected Results
 
