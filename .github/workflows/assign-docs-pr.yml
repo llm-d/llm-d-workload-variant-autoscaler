@@ -5,6 +5,12 @@ name: Assign Docs PR to Original Author
 on:
   pull_request:
     types: [opened]
+  workflow_dispatch:
+    inputs:
+      docs_pr_number:
+        description: 'The docs PR number to assign (will extract source PR from body/branch)'
+        required: true
+        type: number
 
 permissions:
   pull-requests: write
@@ -12,8 +18,10 @@ permissions:
 
 jobs:
   assign-to-original-author:
-    # Only run for PRs created by github-actions bot with docs: title pattern (from Update Docs workflow)
-    if: github.actor == 'github-actions[bot]' && startsWith(github.event.pull_request.title, 'docs:')
+    # Run for: 1) PRs created by github-actions bot with docs: title, or 2) manual workflow_dispatch
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.actor == 'github-actions[bot]' && startsWith(github.event.pull_request.title, 'docs:'))
     runs-on: ubuntu-latest
     steps:
       - name: Get original PR author
@@ -21,10 +29,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          EVENT_PR_BODY: ${{ github.event.pull_request.body }}
+          EVENT_PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          INPUT_DOCS_PR: ${{ inputs.docs_pr_number }}
         run: |
-          echo "PR created by bot, finding original PR author..."
+          echo "Finding original PR author..."
+
+          # For workflow_dispatch, fetch the docs PR details
+          if [ -n "$INPUT_DOCS_PR" ]; then
+            echo "Manual trigger - fetching docs PR #$INPUT_DOCS_PR details..."
+            PR_BODY=$(gh pr view "$INPUT_DOCS_PR" --repo "$REPO" --json body --jq '.body' 2>/dev/null || echo "")
+            PR_HEAD_REF=$(gh pr view "$INPUT_DOCS_PR" --repo "$REPO" --json headRefName --jq '.headRefName' 2>/dev/null || echo "")
+          else
+            PR_BODY="$EVENT_PR_BODY"
+            PR_HEAD_REF="$EVENT_PR_HEAD_REF"
+          fi
 
           ORIGINAL_PR_NUMBER=""
 
@@ -74,9 +93,12 @@ jobs:
         if: steps.get_author.outputs.author != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_DOCS_PR: ${{ inputs.docs_pr_number }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           AUTHOR="${{ steps.get_author.outputs.author }}"
-          PR_NUMBER="${{ github.event.pull_request.number }}"
+          # Use input docs_pr_number if provided (workflow_dispatch), otherwise use event PR number
+          PR_NUMBER="${INPUT_DOCS_PR:-$EVENT_PR_NUMBER}"
 
           echo "Assigning PR #$PR_NUMBER to $AUTHOR (original PR author)"
 
@@ -90,9 +112,12 @@ jobs:
         if: steps.get_author.outputs.author != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_DOCS_PR: ${{ inputs.docs_pr_number }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           AUTHOR="${{ steps.get_author.outputs.author }}"
-          PR_NUMBER="${{ github.event.pull_request.number }}"
+          # Use input docs_pr_number if provided (workflow_dispatch), otherwise use event PR number
+          PR_NUMBER="${INPUT_DOCS_PR:-$EVENT_PR_NUMBER}"
 
           gh pr comment "$PR_NUMBER" \
             --repo "${{ github.repository }}" \
