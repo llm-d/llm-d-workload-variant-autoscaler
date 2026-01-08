@@ -55,8 +55,8 @@ const (
 	llamaModelId        = "unsloth/Meta-Llama-3.1-8B"
 	a100Acc             = "A100"
 	h100Acc             = "H100"
-	inputTokens         = 64
-	outputTokens        = 64
+	inputTokens         = 1500
+	outputTokens        = 1500
 	maxExecutionTimeSec = 600
 	loadRateTolerance   = 10
 	avgITL              = 20
