@@ -20,24 +20,53 @@ jobs:
         id: get_author
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           echo "PR created by bot, finding original PR author..."
 
-          # Get the most recently merged PR to main (within last hour to avoid race conditions)
-          # This is more reliable than looking at commits, as multiple commits can stack
-          PR_AUTHOR=$(gh pr list \
-            --repo "${{ github.repository }}" \
-            --base main \
-            --state merged \
-            --limit 5 \
-            --json author,mergedAt \
-            --jq '[.[] | select(.mergedAt != null)] | sort_by(.mergedAt) | reverse | .[0].author.login' 2>/dev/null || echo "")
+          ORIGINAL_PR_NUMBER=""
+
+          # Try to extract original PR number from the docs PR body (e.g., 'Source PR: #123' or just '#123')
+          if echo "$PR_BODY" | grep -Eq '#[0-9]+'; then
+            ORIGINAL_PR_NUMBER="$(echo "$PR_BODY" | grep -oE '#[0-9]+' | head -n1 | tr -d '#')"
+            echo "Detected original PR number from body: #$ORIGINAL_PR_NUMBER"
+          # Fallback: try to extract PR number from the head branch name (e.g., 'docs/update-123')
+          elif echo "$PR_HEAD_REF" | grep -Eq '[0-9]+'; then
+            ORIGINAL_PR_NUMBER="$(echo "$PR_HEAD_REF" | grep -oE '[0-9]+' | head -n1)"
+            echo "Detected original PR number from head ref: #$ORIGINAL_PR_NUMBER"
+          fi
+
+          PR_AUTHOR=""
+
+          if [ -n "$ORIGINAL_PR_NUMBER" ]; then
+            echo "Fetching author for original PR #$ORIGINAL_PR_NUMBER..."
+            PR_AUTHOR=$(gh pr view "$ORIGINAL_PR_NUMBER" \
+              --repo "$REPO" \
+              --json author \
+              --jq '.author.login' 2>/dev/null || echo "")
+          fi
+
+          # Fallback: use the most recently merged PR to main (within last hour)
+          if [ -z "$PR_AUTHOR" ] || [ "$PR_AUTHOR" = "null" ]; then
+            echo "Could not determine original PR from metadata; falling back to most recently merged PR..."
+            ONE_HOUR_AGO=$(date -u -d '1 hour ago' +'%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -v-1H +'%Y-%m-%dT%H:%M:%SZ')
+            PR_AUTHOR=$(gh pr list \
+              --repo "$REPO" \
+              --base main \
+              --state merged \
+              --limit 5 \
+              --search "merged:>=$ONE_HOUR_AGO" \
+              --json author,mergedAt \
+              --jq '[.[] | select(.mergedAt != null)] | sort_by(.mergedAt) | reverse | .[0].author.login' 2>/dev/null || echo "")
+          fi
 
           if [ -n "$PR_AUTHOR" ] && [ "$PR_AUTHOR" != "null" ]; then
             echo "Found original PR author: $PR_AUTHOR"
             echo "author=$PR_AUTHOR" >> $GITHUB_OUTPUT
           else
-            echo "No recently merged PR found, skipping assignment"
+            echo "No suitable original PR found, skipping assignment"
             echo "author=" >> $GITHUB_OUTPUT
           fi
 
