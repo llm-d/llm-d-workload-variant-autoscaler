@@ -541,9 +541,22 @@ func (e *Engine) applySaturationDecisions(
 		}
 
 		// If we still don't have an accelerator name (e.g. new VA, no decision, no current alloc), we can't update status sensibly
+		// But we still need to set MetricsAvailable condition via the cache
 		if acceleratorName == "" {
-			logger.Info("Skipping status update for VA without accelerator info",
+			logger.Info("Skipping status update for VA without accelerator info, but setting MetricsAvailable=False",
 				"variant", vaName)
+			// Still set the cache entry so the controller can set MetricsAvailable=False
+			common.DecisionCache.Set(va.Name, va.Namespace, interfaces.VariantDecision{
+				VariantName:      vaName,
+				Namespace:        va.Namespace,
+				MetricsAvailable: false,
+				MetricsReason:    "MetricsUnavailable",
+				MetricsMessage:   "No saturation metrics available - pods may not be ready or metrics not yet scraped",
+			})
+			// Trigger reconciler to apply the condition
+			common.DecisionTrigger <- event.GenericEvent{
+				Object: &updateVa,
+			}
 			continue
 		}
 
