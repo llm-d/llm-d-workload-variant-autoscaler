@@ -292,6 +292,25 @@ See [CRD Reference](crd-reference.md) for advanced configuration options.
 
 ## Best Practices
 
+### Environment Variables
+
+WVA supports configuration via environment variables for operational settings:
+
+**Prometheus Configuration:**
+- `PROMETHEUS_BASE_URL`: Prometheus server URL (required for metrics collection)
+- `PROMETHEUS_TLS_INSECURE_SKIP_VERIFY`: Skip TLS verification (development only)
+- `PROMETHEUS_CA_CERT_PATH`: CA certificate path for TLS
+- `PROMETHEUS_CLIENT_CERT_PATH`: Client certificate for mutual TLS
+- `PROMETHEUS_CLIENT_KEY_PATH`: Client key for mutual TLS
+- `PROMETHEUS_SERVER_NAME`: Expected server name in TLS certificate
+- `PROMETHEUS_BEARER_TOKEN`: Bearer token for authentication
+
+**Other Configuration:**
+- `CONFIG_MAP_NAME`: ConfigMap name (default: auto-generated from Helm release)
+- `POD_NAMESPACE`: Controller namespace (auto-injected by Kubernetes)
+
+See [Prometheus Integration](../integrations/prometheus.md) for detailed Prometheus configuration.
+
 ### Choosing Service Classes
 
 - **Premium**: Latency-sensitive applications (chatbots, interactive AI)

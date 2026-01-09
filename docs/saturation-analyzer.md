@@ -13,6 +13,7 @@ The Saturation Analyzer is a **fast, reactive, and safe saturation guardrail** t
 - ✅ Detects imminent capacity exhaustion (KV-cache or request queue)
 - ✅ Makes **per-variant** target replica calculations with cost-awareness
 - ✅ Uses ready replicas (those reporting metrics) to avoid excessive scale-up
+- ✅ **Prevents cascade scaling** by blocking scale-up when replicas are pending
 - ✅ Preserves desired replicas from previous optimizer runs (in Step 1)
 - ✅ Arbitrates with model-based optimizer targets (in Step 2) using safety overrides
 - ✅ Analyzes capacity across all variants of the same model
@@ -167,6 +168,8 @@ For each variant, determines target replicas based on **capacity needs only**:
 
 **Note:** `readyReplicas` = number of replicas reporting capacity metrics (from `VariantCapacityAnalysis.ReplicaCount`). This prevents excessive scale-up when replicas are still starting up.
 
+**Cascade Scaling Prevention:** Variants with pending replicas (pods that exist but are not yet ready) are skipped during scale-up selection. This prevents the controller from repeatedly scaling up the same variant while previous scale-up operations are still in progress. Pod startup can take 2-7 minutes depending on model size and hardware (container initialization, model loading, health checks).
+
 **Example - Step 1 Output:**
 ```
 Model: llama-70b
@@ -197,9 +200,10 @@ Only runs when model-based optimizer provides per-variant targets. Applies hybri
 2. **Preserve desired replicas** (Step 1): When desired ≠ current, always use desired as capacity target
 3. **Cost-aware selection** (Step 1): Cheapest variant for scale-up, most expensive for scale-down
 4. **Deterministic tie-breaking** (Step 1): When variants have equal costs, alphabetically first for scale-up, last for scale-down
-5. **Capacity veto** (Step 2): Capacity needs override model-based scale-down suggestions
-6. **Safety block** (Step 2): Unsafe scale-down blocked regardless of model-based recommendation
-7. **Model-based priority** (Step 2): When capacity allows, follow model-based recommendations
+5. **Pending replica awareness** (Step 1): Skip variants with pending replicas during scale-up to prevent cascade scaling
+6. **Capacity veto** (Step 2): Capacity needs override model-based scale-down suggestions
+7. **Safety block** (Step 2): Unsafe scale-down blocked regardless of model-based recommendation
+8. **Model-based priority** (Step 2): When capacity allows, follow model-based recommendations
 
 ## Usage Examples
 
@@ -228,9 +232,10 @@ config := interfaces.DefaultCapacityScalingConfig()
 analysis, err := analyzer.AnalyzeModelCapacity(ctx, modelID, namespace, replicaMetrics, config)
 
 // Build variant states (current replicas from pod count, desired from CRD status)
+// PendingReplicas = CurrentReplicas - ReadyReplicas (pods that exist but aren't ready yet)
 variantStates := []interfaces.VariantReplicaState{
-    {VariantName: "v1-l4", CurrentReplicas: 2, DesiredReplicas: 0},    // no previous optimizer run
-    {VariantName: "v2-a100", CurrentReplicas: 3, DesiredReplicas: 4},  // optimizer wanted 4 last time
+    {VariantName: "v1-l4", CurrentReplicas: 2, DesiredReplicas: 0, PendingReplicas: 0},    // no previous optimizer run, all ready
+    {VariantName: "v2-a100", CurrentReplicas: 4, DesiredReplicas: 4, PendingReplicas: 1},  // optimizer wanted 4, 1 pod still starting
 }
 
 // === STEP 1: Calculate saturation-based targets ===
@@ -356,6 +361,59 @@ for _, va := range analysis.VariantAnalyses {
 ```
 
 ## Configuration
+
+### Cascade Scaling Prevention
+
+**Problem:** Without pending replica awareness, the saturation analyzer could repeatedly trigger scale-up for the same variant before previous scale-up operations complete, leading to excessive replica counts.
+
+**Timeline Example (Without Protection):**
+```
+T+0s:  Saturation detected → Scale up variant-1 from 2 to 3 replicas
+T+30s: New pod created but not ready yet (still loading model)
+       Saturation still detected (only 2 ready replicas) → Scale up to 4 replicas
+T+60s: Both new pods still starting, saturation persists → Scale up to 5 replicas
+T+90s: All 5 pods now ready, but we have 3 extra replicas (over-provisioned)
+```
+
+**Solution:** WVA tracks **pending replicas** (`CurrentReplicas - ReadyReplicas`) per variant and skips variants with pending replicas during scale-up selection.
+
+**How It Works:**
+1. **Replica State Tracking**: Controller maintains `VariantReplicaState` with:
+   - `CurrentReplicas`: Total pods (from Deployment)
+   - `DesiredReplicas`: Target from previous optimizer run (from CRD status)
+   - `PendingReplicas`: Pods that exist but aren't ready (`CurrentReplicas - ReadyReplicas`)
+
+2. **Scale-Up Selection**: When saturation triggers scale-up:
+   ```go
+   // Pseudo-code from internal/saturation/analyzer.go
+   for each variant:
+       if variant has preserved desired replicas:
+           skip  // Already has optimizer guidance
+       if variant.PendingReplicas > 0:
+           skip  // Wait for pending pods to become ready
+       if variant.Cost < cheapest.Cost:
+           cheapest = variant
+   
+   scale_up(cheapest)  // Only if no pending replicas
+   ```
+
+3. **Per-Variant Tracking**: Each variant is tracked independently. If variant-1 has pending replicas, variant-2 can still scale up if it's the cheapest eligible variant.
+
+**Timeline Example (With Protection):**
+```
+T+0s:  Saturation detected → Scale up variant-1 from 2 to 3 (PendingReplicas=1)
+T+30s: Saturation still detected, but variant-1 skipped (has 1 pending replica)
+       If variant-2 is cheaper and has no pending replicas → Scale up variant-2
+T+90s: variant-1 pod becomes ready (PendingReplicas=0), now eligible for scale-up again
+```
+
+**Benefits:**
+- ✅ Prevents excessive scale-up during model loading periods (2-7 minutes)
+- ✅ Reduces infrastructure costs by avoiding over-provisioning
+- ✅ Maintains cost-optimized scaling across multiple variants
+- ✅ Works with both saturation-only and hybrid (model-based + saturation) modes
+
+**Note:** Scale-down operations are not affected by pending replicas, as removing capacity is always safe when replicas are starting up.
 
 Saturation scaling thresholds are configured via ConfigMap (see [saturation-scaling-config.md](saturation-scaling-config.md)):
 

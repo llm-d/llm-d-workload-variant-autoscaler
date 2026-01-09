@@ -60,6 +60,11 @@ The saturation analyzer uses a **spare capacity model** to determine when to sca
    - If `avg_spare_kv < kvSpareTrigger` **OR** `avg_spare_queue < queueSpareTrigger`
    - Scale-up is triggered to add capacity before existing replicas saturate
 
+4. **Cascade scaling prevention**:
+   - Variants with pending replicas (pods that exist but aren't ready yet) are skipped during scale-up
+   - This prevents repeatedly scaling the same variant while previous scale-up operations complete
+   - Pod startup can take 2-7 minutes (model loading, health checks)
+
 **Example scenario:**
 - `kvCacheThreshold = 0.80`, `kvSpareTrigger = 0.10`
 - Replica A: 65% KV cache usage → Spare capacity: 0.15
