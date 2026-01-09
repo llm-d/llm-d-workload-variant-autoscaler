@@ -56,6 +56,12 @@ type Engine struct {
 	ReplicaMetricsCollectorV2 *saturationmetrics.ReplicaMetricsCollector
 }
 
+// getVariantKey returns a unique key for a variant combining namespace and name.
+// This ensures no collisions when multiple namespaces have deployments with the same name.
+func getVariantKey(namespace, name string) string {
+	return namespace + "/" + name
+}
+
 // NewEngine creates a new instance of the saturation engine.
 func NewEngine(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, metricsRegistry *collectorv2.SourceRegistry) *Engine {
 	promSource := metricsRegistry.Get("prometheus") // assume prometheus source is registered
@@ -156,11 +162,11 @@ func (e *Engine) optimize(ctx context.Context) error {
 
 	// Create VA lookup map for applySaturationDecisions (used to access VA status and update decisions)
 	// Copy slice elements to local variable to ensure stable pointers
-	// Use deployment name (ScaleTargetName) as key since decision.VariantName uses deployment name
+	// Use namespace/deploymentName as key to avoid collisions when multiple namespaces have same deployment name
 	vaMap := make(map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling, len(activeVAs))
 	for i := range activeVAs {
 		va := activeVAs[i] // Copy to local variable to ensure stable pointer
-		vaMap[va.GetScaleTargetName()] = &va
+		vaMap[getVariantKey(va.Namespace, va.GetScaleTargetName())] = &va
 	}
 
 	// Create map to store current allocations populated during metrics collection
@@ -257,9 +263,9 @@ func (e *Engine) BuildVariantStates(
 				continue
 			}
 			deploy = fetchedDeploy
-			ctrl.LoggerFrom(ctx).Info("DEBUG: BuildVariantStates fallback lookup", "variant", va.Name, "deployName", deploy.Name, "specReplicas", deploy.Spec.Replicas, "statusReplicas", deploy.Status.Replicas)
+			ctrl.LoggerFrom(ctx).V(1).Info("BuildVariantStates fallback lookup", "variant", va.Name, "deployName", deploy.Name, "specReplicas", deploy.Spec.Replicas, "statusReplicas", deploy.Status.Replicas, "readyReplicas", deploy.Status.ReadyReplicas)
 		} else {
-			ctrl.LoggerFrom(ctx).Info("DEBUG: BuildVariantStates map lookup", "variant", va.Name, "deployName", deploy.Name, "specReplicas", deploy.Spec.Replicas, "statusReplicas", deploy.Status.Replicas)
+			ctrl.LoggerFrom(ctx).V(1).Info("BuildVariantStates map lookup", "variant", va.Name, "deployName", deploy.Name, "specReplicas", deploy.Spec.Replicas, "statusReplicas", deploy.Status.Replicas, "readyReplicas", deploy.Status.ReadyReplicas)
 		}
 
 		currentReplicas := int(deploy.Status.Replicas)
@@ -267,12 +273,24 @@ func (e *Engine) BuildVariantStates(
 			currentReplicas = int(*deploy.Spec.Replicas)
 		}
 
-		ctrl.LoggerFrom(ctx).Info("DEBUG: BuildVariantStates result", "variant", va.Name, "currentReplicas", currentReplicas)
+		// Calculate pending replicas (not yet ready)
+		readyReplicas := int(deploy.Status.ReadyReplicas)
+		pendingReplicas := currentReplicas - readyReplicas
+		if pendingReplicas < 0 {
+			// This indicates an unexpected state where readyReplicas exceeds currentReplicas.
+			// Log at Info level since this inconsistency should be visible to operators.
+			ctrl.LoggerFrom(ctx).Info("Unexpected state: readyReplicas exceeds currentReplicas, clamping pendingReplicas to 0",
+				"variant", va.Name, "currentReplicas", currentReplicas, "readyReplicas", readyReplicas)
+			pendingReplicas = 0
+		}
+
+		ctrl.LoggerFrom(ctx).V(1).Info("BuildVariantStates result", "variant", va.Name, "currentReplicas", currentReplicas, "readyReplicas", readyReplicas, "pendingReplicas", pendingReplicas)
 
 		states = append(states, interfaces.VariantReplicaState{
 			VariantName:     deploy.Name,
 			CurrentReplicas: currentReplicas,
 			DesiredReplicas: va.Status.DesiredOptimizedAlloc.NumReplicas,
+			PendingReplicas: pendingReplicas,
 		})
 	}
 
@@ -453,9 +471,10 @@ func (e *Engine) applySaturationDecisions(
 ) error {
 	logger := ctrl.LoggerFrom(ctx)
 	// Create a map of decisions for O(1) lookup
+	// Use namespace/variantName as key to match vaMap and avoid collisions
 	decisionMap := make(map[string]interfaces.VariantDecision)
 	for _, d := range decisions {
-		decisionMap[d.VariantName] = d
+		decisionMap[getVariantKey(d.Namespace, d.VariantName)] = d
 	}
 
 	// Iterate over ALL active VAs to ensure we update status and trigger reconciliation for everyone

@@ -365,13 +365,22 @@ func (a *Analyzer) CalculateSaturationTargets(
 		}
 	}
 
-	// Determine Saturation action
+	// Determine saturation action
 	if saturationAnalysis.ShouldScaleUp {
-		// Find cheapest variant that doesn't have preserved desired
+		// Find cheapest variant that doesn't have preserved desired and has no pending replicas.
+		// We check pending replicas per-variant rather than globally, so a variant without
+		// pending pods can scale up even if another variant has pending pods.
 		var cheapestNonPreserved *interfaces.VariantSaturationAnalysis
 		for i := range saturationAnalysis.VariantAnalyses {
 			va := &saturationAnalysis.VariantAnalyses[i]
 			if preservedVariants[va.VariantName] {
+				continue
+			}
+			// Skip variants with pending replicas to prevent cascade scaling
+			state := stateMap[va.VariantName]
+			if state.PendingReplicas > 0 {
+				ctrl.LoggerFrom(ctx).V(logging.DEBUG).Info("Skipping variant with pending replicas for scale-up",
+					"variant", va.VariantName, "pendingReplicas", state.PendingReplicas)
 				continue
 			}
 			// Select cheapest, with stable tie-breaking by variant name (alphabetically first)
@@ -391,7 +400,6 @@ func (a *Analyzer) CalculateSaturationTargets(
 				"variant", cheapestNonPreserved.VariantName, "cost", cheapestNonPreserved.Cost, "currentReplicas", state.CurrentReplicas,
 				"readyReplicas", cheapestNonPreserved.ReplicaCount, "baseTarget", baseTarget, "target", targets[cheapestNonPreserved.VariantName], "reason", saturationAnalysis.ScaleUpReason)
 		}
-
 	} else if saturationAnalysis.ScaleDownSafe {
 		// Find most expensive variant that doesn't have preserved desired
 		var mostExpensiveNonPreserved *interfaces.VariantSaturationAnalysis
@@ -426,7 +434,8 @@ func (a *Analyzer) CalculateSaturationTargets(
 	} else {
 		// No scaling action needed - Saturation is adequate and stable
 		ctrl.LoggerFrom(ctx).V(logging.DEBUG).Info("Saturation targets: no scaling needed",
-			saturationAnalysis.AvgSpareKvCapacity, saturationAnalysis.AvgSpareQueueLength)
+			"avgSpareKvCapacity", saturationAnalysis.AvgSpareKvCapacity,
+			"avgSpareQueueLength", saturationAnalysis.AvgSpareQueueLength)
 	}
 
 	return targets

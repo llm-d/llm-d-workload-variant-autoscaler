@@ -1206,6 +1206,95 @@ func GetInfernoReplicaMetrics(variantName, namespace, acceleratorType string) (c
 	return currentReplicas, desiredReplicas, desiredRatio, nil
 }
 
+// DefaultPrometheusURL is the default Prometheus endpoint for E2E tests.
+// Environment variables:
+//   - PROMETHEUS_URL: Override the Prometheus endpoint (default: https://localhost:9090)
+//   - PROMETHEUS_SKIP_TLS_VERIFY: Set to "false" to enable TLS cert verification (default: true)
+const DefaultPrometheusURL = "https://localhost:9090"
+
+// DefaultPrometheusQueryTimeout is the default timeout for Prometheus queries.
+// This can be adjusted for environments with slower network or larger result sets.
+const DefaultPrometheusQueryTimeout = 30 * time.Second
+
+// namespaceRegex validates Kubernetes namespace names (RFC 1123 DNS label)
+var namespaceRegex = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+// validateNamespace checks if a namespace name is valid to prevent PromQL injection.
+func validateNamespace(namespace string) error {
+	if namespace == "" {
+		return fmt.Errorf("namespace cannot be empty")
+	}
+	if len(namespace) > 63 {
+		return fmt.Errorf("namespace too long: %d characters (max 63)", len(namespace))
+	}
+	if !namespaceRegex.MatchString(namespace) {
+		return fmt.Errorf("invalid namespace name: must be lowercase alphanumeric with optional dashes")
+	}
+	return nil
+}
+
+// GetQueueMetrics queries Prometheus for vLLM queue length metrics for pods in a namespace.
+// Returns a map of pod name to queue length, and total queue length across all pods.
+func GetQueueMetrics(namespace string) (podQueues map[string]float64, totalQueue float64, err error) {
+	// Validate namespace to prevent PromQL injection
+	if err := validateNamespace(namespace); err != nil {
+		return nil, 0, fmt.Errorf("invalid namespace: %w", err)
+	}
+
+	prometheusURL := os.Getenv("PROMETHEUS_URL")
+	if prometheusURL == "" {
+		prometheusURL = DefaultPrometheusURL
+	}
+
+	// Allow TLS verification to be configured via environment variable.
+	// WARNING: insecureSkipVerify=true disables TLS certificate verification and is intended
+	// only for E2E tests with self-signed certificates. Do not use in production.
+	// Set PROMETHEUS_SKIP_TLS_VERIFY=false to enable certificate verification.
+	insecureSkipVerify := true // Default for E2E tests with self-signed certs
+	if skipVerify := os.Getenv("PROMETHEUS_SKIP_TLS_VERIFY"); skipVerify != "" {
+		insecureSkipVerify = strings.EqualFold(skipVerify, "true")
+	}
+
+	client, err := NewPrometheusClient(prometheusURL, insecureSkipVerify)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create prometheus client: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultPrometheusQueryTimeout)
+	defer cancel()
+
+	// Query queue length per pod
+	// Note: PromQL doesn't support parameterized queries. This is safe because:
+	// 1. constants.VLLMNumRequestsWaiting is a compile-time constant we control
+	// 2. namespace is validated above against RFC 1123 DNS label format (alphanumeric + dashes only)
+	query := fmt.Sprintf(`%s{namespace="%s"}`, constants.VLLMNumRequestsWaiting, namespace)
+
+	result, warnings, err := client.client.Query(ctx, query, time.Now())
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query queue metrics: %w", err)
+	}
+	if len(warnings) > 0 {
+		fmt.Printf("Prometheus warnings: %v\n", warnings)
+	}
+
+	podQueues = make(map[string]float64)
+
+	if result.Type() == model.ValVector {
+		vector, ok := result.(model.Vector)
+		if !ok {
+			return nil, 0, fmt.Errorf("unexpected Prometheus result type: %T", result)
+		}
+		for _, sample := range vector {
+			podName := string(sample.Metric["pod"])
+			queueLen := float64(sample.Value)
+			podQueues[podName] = queueLen
+			totalQueue += queueLen
+		}
+	}
+
+	return podQueues, totalQueue, nil
+}
+
 // setupEnvironment sets up necessary environment variables for the E2E tests
 func SetupTestEnvironment(image string, numNodes, gpusPerNode int, gpuTypes string) {
 	// Set default environment variables for Kind cluster creation

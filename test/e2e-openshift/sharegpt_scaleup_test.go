@@ -35,6 +35,7 @@ import (
 
 	v1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/constants"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/test/utils"
 )
 
 // sanitizeK8sName converts a human-readable name to a valid Kubernetes resource name.
@@ -55,17 +56,23 @@ func sanitizeK8sName(name string) string {
 var lowLoad = numPrompts <= 2000 && requestRate <= 8
 
 // Load generation configuration constants
-// Note: baseLoadWorkers is tuned for 2 replicas. The actual number of workers
-// is scaled proportionally to initialReplicas to ensure consistent load pressure
-// per replica and prevent excessive scaling on clusters with limited GPUs.
+// These values were tuned empirically to achieve ~2-3 replica scale-up without excessive scaling.
+// Original values (baseLoadWorkers=10, batchSize=50, batchSleepDuration=0.1) caused cascade
+// scaling to 8+ replicas because WVA reconciles frequently (around every 30s with the tested
+// configuration) while pods take 5-7 min to become ready.
+//
+// NOTE: These values are environment-specific and may need tuning for different hardware
+// configurations, model sizes, or inference implementations. The current values target
+// sustainable load that triggers scale-up but caps at ~3 replicas under the tested
+// reconciliation interval and pod readiness characteristics.
 const (
-	baseLoadWorkers    = 10    // Base number of workers (tuned for 2 replicas)
-	baseReplicas       = 2     // The replica count baseLoadWorkers is tuned for
-	requestsPerWorker  = 500   // Requests each worker sends
-	batchSize          = 50    // Concurrent requests per batch
-	curlTimeoutSeconds = 180   // Timeout for each curl request (increased for longer outputs)
-	maxTokens          = 400   // Max tokens for completion requests (increased to sustain GPU load)
-	batchSleepDuration = "0.1" // Sleep duration between batches to control rate
+	baseLoadWorkers         = 2     // Reduced from 10 to limit concurrent load (targets max ~3 replicas)
+	baseReplicas            = 2     // The replica count baseLoadWorkers is tuned for
+	maxSingleReplicaWorkers = 1     // Max workers when deployment has only 1 replica (prevents queue explosion)
+	batchSize               = 10    // Reduced from 50 to limit concurrent requests per batch
+	curlTimeoutSeconds      = 180   // Timeout for each curl request (increased for longer outputs)
+	batchSleepDuration      = "0.5" // Increased from 0.1 to slow request rate between batches
+	// Note: maxTokens and requestsPerWorker are now per-model - see modelTestConfig
 )
 
 // modelTestConfig holds configuration for testing a specific model
@@ -76,6 +83,12 @@ type modelTestConfig struct {
 	// gatewayService is the Istio gateway service name for routing traffic
 	// Traffic should go through the gateway to be properly routed via InferencePool
 	gatewayService string
+	// maxTokens controls max tokens per request - use lower values (64) for fast responses,
+	// higher values (1500) for sustained GPU load testing
+	maxTokens int
+	// requestsPerWorker controls how many requests each worker sends - use higher values
+	// for fast-completing requests (low tokens) to sustain load longer
+	requestsPerWorker int
 }
 
 // getModelsToTest returns the list of models to test based on configuration
@@ -86,20 +99,24 @@ func getModelsToTest() []modelTestConfig {
 
 	models := []modelTestConfig{
 		{
-			name:           "Model A1",
-			namespace:      llmDNamespace,
-			deployment:     deployment,
-			gatewayService: gatewayServiceName,
+			name:              "Model A1",
+			namespace:         llmDNamespace,
+			deployment:        deployment,
+			gatewayService:    gatewayServiceName,
+			maxTokens:         400,  // Moderate tokens for ~3s requests, sustains queue during test
+			requestsPerWorker: 1000, // Balanced request count for moderate-length requests
 		},
 	}
 
 	// Add Model B if secondary namespace is configured (multi-model mode)
 	if multiModelMode && llmDNamespaceB != "" {
 		models = append(models, modelTestConfig{
-			name:           "Model B",
-			namespace:      llmDNamespaceB,
-			deployment:     deployment, // Model B uses the same deployment name as A1
-			gatewayService: gatewayServiceName,
+			name:              "Model B",
+			namespace:         llmDNamespaceB,
+			deployment:        deployment, // Model B uses the same deployment name as A1
+			gatewayService:    gatewayServiceName,
+			maxTokens:         1500, // Long requests to test sustained GPU load
+			requestsPerWorker: 500,  // Fewer requests since each takes ~10s
 		})
 	}
 
@@ -159,6 +176,12 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 				scaledLoadWorkers = int(math.Round(float64(baseLoadWorkers*initialReplicas) / float64(baseReplicas)))
 				if scaledLoadWorkers < 1 {
 					scaledLoadWorkers = 1 // Minimum 1 worker
+				}
+				// Cap workers for single-replica deployments to avoid cold-start overwhelm
+				// With 1 replica, EPP routes all traffic to one pod - too many workers causes
+				// queue explosion before scale-up kicks in
+				if initialReplicas == 1 && scaledLoadWorkers > maxSingleReplicaWorkers {
+					scaledLoadWorkers = maxSingleReplicaWorkers
 				}
 				_, _ = fmt.Fprintf(GinkgoWriter, "Initial ready replicas: %d\n", initialReplicas)
 				_, _ = fmt.Fprintf(GinkgoWriter, "Scaled load workers: %d (base: %d for %d replicas)\n", scaledLoadWorkers, baseLoadWorkers, baseReplicas)
@@ -229,6 +252,22 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 					_, _ = fmt.Fprintf(GinkgoWriter, "Waiting for VA to be ready: optimized=%d, minReplicas=%d\n", optimized, hpaMinReplicas)
 					// Wait for optimized >= minReplicas (allows for initial 0 during engine startup)
 					g.Expect(optimized).To(BeNumerically(">=", hpaMinReplicas), "VA should have optimized >= minReplicas")
+				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+				// Wait for deployment to be fully stable (no pods in transition)
+				// This prevents starting load while pods are terminating from scale-down
+				By("waiting for deployment to stabilize (no pods in transition)")
+				Eventually(func(g Gomega) {
+					currentDeploy, err := k8sClient.AppsV1().Deployments(model.namespace).Get(ctx, model.deployment, metav1.GetOptions{})
+					g.Expect(err).NotTo(HaveOccurred())
+					specReplicas := *currentDeploy.Spec.Replicas
+					statusReplicas := currentDeploy.Status.Replicas
+					readyReplicas := currentDeploy.Status.ReadyReplicas
+					_, _ = fmt.Fprintf(GinkgoWriter, "Waiting for deployment stability: spec=%d, status=%d, ready=%d\n",
+						specReplicas, statusReplicas, readyReplicas)
+					// All replica counts must match - no pods starting or terminating
+					g.Expect(statusReplicas).To(Equal(specReplicas), "Status replicas should match spec")
+					g.Expect(readyReplicas).To(Equal(specReplicas), "Ready replicas should match spec")
 				}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
 				// Re-read VA to get stabilized state
@@ -349,7 +388,7 @@ exit 1`,
 				time.Sleep(2 * time.Second)
 
 				By(fmt.Sprintf("creating %d parallel load generation jobs targeting gateway", scaledLoadWorkers))
-				loadErr := createParallelLoadJobsForModel(ctx, jobBaseName, model.namespace, model.gatewayService, scaledLoadWorkers, requestsPerWorker)
+				loadErr := createParallelLoadJobsForModel(ctx, jobBaseName, model.namespace, model.gatewayService, scaledLoadWorkers, model.requestsPerWorker, model.maxTokens)
 				Expect(loadErr).NotTo(HaveOccurred(), "Should be able to create load generation jobs")
 
 				By("waiting for job pods to be running")
@@ -392,23 +431,13 @@ exit 1`,
 					// currentRateStr := va.Status.DesiredOptimizedAlloc.Load.ArrivalRate (Load not in status)
 					currentRateStr := "unknown"
 
-					// Dynamically update initial baseline if replicas decrease during the test.
-					// This is intentional and correct behavior, not masking bugs:
-					// - The "initial" capture happens after VA stabilizes at >= minReplicas
-					// - Due to timing, initial may capture a transient higher value (e.g., 2)
-					//   before the engine scales down to the true baseline (e.g., 1)
-					// - Without this adjustment, the test would fail (2 > 2 is false) even though
-					//   the system correctly scaled up from 1 to 2 under load
-					// - The scale-up assertion (scaledOptimized > initialOptimized) verifies that
-					//   load causes scaling ABOVE the stabilized no-load state
-					if scaledOptimized < initialOptimized {
-						_, _ = fmt.Fprintf(GinkgoWriter, "Updating initial baseline from %d to %d (system scaled down before load)\n",
-							initialOptimized, scaledOptimized)
-						initialOptimized = scaledOptimized
-					}
-
 					_, _ = fmt.Fprintf(GinkgoWriter, "VA optimized replicas: %d (initial: %d, minReplicas: %d), arrival rate: %s\n",
 						scaledOptimized, initialOptimized, hpaMinReplicas, currentRateStr)
+
+					// Log queue metrics for observability
+					if podQueues, totalQueue, qErr := utils.GetQueueMetrics(model.namespace); qErr == nil {
+						_, _ = fmt.Fprintf(GinkgoWriter, "Queue metrics: total=%.0f, per-pod=%v\n", totalQueue, podQueues)
+					}
 
 					// Log load gen job output if arrival rate stays at 0 for too long (debugging)
 					if currentRateStr == "0.00" || currentRateStr == "" {
@@ -520,7 +549,8 @@ exit 1`,
 
 // createLoadGenerationJob creates a lightweight Kubernetes Job that generates load using curl
 // The gatewayService parameter should be the Istio gateway service name (port 80)
-func createLoadGenerationJob(name, namespace, gatewayService, experimentLabel string, workerID, numRequests int) *batchv1.Job {
+// modelMaxTokens specifies max tokens per request (use lower values for fast responses, higher for sustained load)
+func createLoadGenerationJob(name, namespace, gatewayService, experimentLabel string, workerID, numRequests, modelMaxTokens int) *batchv1.Job {
 	backoffLimit := int32(0)
 
 	script := fmt.Sprintf(`#!/bin/sh
@@ -581,7 +611,7 @@ wait || true
 
 echo "Worker $WORKER_ID: completed all $TOTAL_REQUESTS requests"
 exit 0
-`, workerID, numRequests, batchSize, curlTimeoutSeconds, maxTokens, batchSleepDuration, modelID, gatewayService)
+`, workerID, numRequests, batchSize, curlTimeoutSeconds, modelMaxTokens, batchSleepDuration, modelID, gatewayService)
 
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -629,15 +659,15 @@ exit 0
 
 // createParallelLoadJobsForModel creates multiple parallel load generation jobs for a specific model
 // Traffic is routed through the gateway service (port 80) to be properly handled by InferencePool/EPP
-func createParallelLoadJobsForModel(ctx context.Context, baseName, namespace, gatewayService string, numWorkers, requestsPerWorker int) error {
+func createParallelLoadJobsForModel(ctx context.Context, baseName, namespace, gatewayService string, numWorkers, requestsPerWorker, modelMaxTokens int) error {
 	for i := 1; i <= numWorkers; i++ {
 		jobName := fmt.Sprintf("%s-%d", baseName, i)
-		job := createLoadGenerationJob(jobName, namespace, gatewayService, baseName, i, requestsPerWorker)
+		job := createLoadGenerationJob(jobName, namespace, gatewayService, baseName, i, requestsPerWorker, modelMaxTokens)
 		_, err := k8sClient.BatchV1().Jobs(namespace).Create(ctx, job, metav1.CreateOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to create job %s: %w", jobName, err)
 		}
-		_, _ = fmt.Fprintf(GinkgoWriter, "Created load generation job: %s (targeting gateway %s)\n", jobName, gatewayService)
+		_, _ = fmt.Fprintf(GinkgoWriter, "Created load generation job: %s (targeting gateway %s, maxTokens=%d)\n", jobName, gatewayService, modelMaxTokens)
 	}
 	return nil
 }

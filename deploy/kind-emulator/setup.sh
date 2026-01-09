@@ -99,10 +99,14 @@ done
 kind create cluster --name "${cluster_name}" --config kind-config.yaml
 
 control_plane_node="${cluster_name}-control-plane"
-echo "[2/6] Waiting for node ${control_plane_node} to be ready..."
-while [[ $(kubectl get nodes "${control_plane_node}" --no-headers 2>/dev/null | awk '{print $2}') != "Ready" ]]; do
-    sleep 1
-done
+echo "[2/6] Waiting for all nodes to be ready..."
+# Wait for all nodes to be Ready using kubectl wait (idiomatic approach)
+# This ensures CNI is fully initialized on all nodes before proceeding
+if ! kubectl wait --for=condition=Ready node --all --timeout=120s 2>/dev/null; then
+    echo "Warning: Timed out waiting for nodes to be Ready after 120s"
+    kubectl get nodes
+fi
+echo "All nodes are Ready"
 
 echo "[2.1/6] Removing control-plane node taint to allow scheduling..."
 
