@@ -1,4 +1,3 @@
-# NOTE: we are currently updating the documentation to be aligned with the 0.4.0 release
 # Saturation Analyzer
 
 ## Overview
@@ -21,23 +20,25 @@ The Saturation Analyzer is a **fast, reactive, and safe saturation guardrail** t
 
 ### Components
 
-**1. Saturation Analyzer (`internal/capacity/analyzer.go`)**
+**1. Saturation Analyzer (`internal/saturation/analyzer.go`)**
 - Core analysis logic for saturation-based scaling decisions
 - Implements spare capacity calculations
 - Performs worst-case scale-down safety simulation
 - Makes **per-variant** scaling decisions with cost-awareness
-- Supports capacity-only mode and hybrid mode with model-based optimization
+- Supports saturation-only mode and hybrid mode with model-based optimization
 
-**2. Metrics Collector (`internal/collector/capacity_metrics.go`)**
-- Collects vLLM metrics from Prometheus using `max_over_time[1m]` queries
+**2. Metrics Collector (`internal/engines/saturation/metrics/replica_metrics.go`)**
+- Collects vLLM metrics from Prometheus using the v2 collector infrastructure
+- Uses `max_over_time[1m]` queries via registered query templates
 - Queries `constants.VLLMKvCacheUsagePerc` and `constants.VLLMNumRequestsWaiting`
-- Uses peak values over 1 minute for safety-first capacity analysis
-- Enriches metrics with pod metadata (variant name, accelerator type)
+- Uses peak values over 1 minute for safety-first saturation analysis
+- Enriches metrics with pod metadata (variant name, accelerator type, cost)
+- Filters stale metrics (default: 2 minutes) to avoid data from terminated pods
 
-**3. Interfaces (`internal/interfaces/capacity_analyzer.go`)**
+**3. Interfaces (`internal/interfaces/saturation_analyzer.go`)**
 - Defines data structures for replica metrics (including variant cost)
 - Defines analysis results and per-variant decision types
-- Provides interface for capacity analysis
+- Provides interface for saturation analysis
 - Defines `VariantDecision` for per-variant scaling decisions
 - Defines `VariantReplicaState` for current/desired replica tracking
 
@@ -55,16 +56,16 @@ The Saturation Analyzer is a **fast, reactive, and safe saturation guardrail** t
          │ ReplicaMetrics[] (with cost)
          ↓
 ┌──────────────────────────┐
-│ AnalyzeModelCapacity     │  ← CapacityScalingConfig
+│ AnalyzeModelSaturation   │  ← SaturationScalingConfig
 └────────┬─────────────────┘
-         │ ModelCapacityAnalysis (with per-variant breakdown)
+         │ ModelSaturationAnalysis (with per-variant breakdown)
          ↓
 ┌─────────────────────────────┐
-│ STEP 1: CalculateCapacityTargets  │  ← VariantReplicaState[] (current/desired from CRD)
+│ STEP 1: CalculateSaturationTargets│  ← VariantReplicaState[] (current/desired from CRD)
 │ - Preserves desired replicas      │
 │ - Cost-aware variant selection    │
 └────────┬──────────────────────────┘
-         │ Capacity Targets: map[variantName]targetReplicas
+         │ Saturation Targets: map[variantName]targetReplicas
          ↓
    ┌─────┴──────────────────┐
    │                        │
@@ -152,26 +153,26 @@ N_non_sat >= 2
 
 ## Two-Step Decision Logic
 
-### Step 1: Calculate Capacity Targets
+### Step 1: Calculate Saturation Targets
 
-`CalculateCapacityTargets(capacityAnalysis, variantStates) → map[variantName]targetReplicas`
+`CalculateSaturationTargets(saturationAnalysis, variantStates) → map[variantName]targetReplicas`
 
-For each variant, determines target replicas based on **capacity needs only**:
+For each variant, determines target replicas based on **saturation needs only**:
 
 | Condition | Target Replicas | Rationale |
 |-----------|----------------|-----------|
 | **desired ≠ 0 AND desired ≠ current** | target = **desired** | Preserve previous optimizer decision (from CRD status) |
-| Capacity needs scale-up | **Cheapest** non-preserved variant: readyReplicas + 1 | Cost-optimized capacity expansion (deterministic: alphabetically first variant on tie) |
-| Capacity allows scale-down | **Most expensive** non-preserved variant: readyReplicas - 1 | Cost-optimized capacity reduction (deterministic: alphabetically last variant on tie) |
-| Otherwise | target = readyReplicas | No capacity action needed |
+| Saturation needs scale-up | **Cheapest** non-preserved variant: readyReplicas + 1 | Cost-optimized saturation expansion (deterministic: alphabetically first variant on tie) |
+| Saturation allows scale-down | **Most expensive** non-preserved variant: readyReplicas - 1 | Cost-optimized saturation reduction (deterministic: alphabetically last variant on tie) |
+| Otherwise | target = readyReplicas | No saturation action needed |
 
-**Note:** `readyReplicas` = number of replicas reporting capacity metrics (from `VariantCapacityAnalysis.ReplicaCount`). This prevents excessive scale-up when replicas are still starting up.
+**Note:** `readyReplicas` = number of replicas reporting saturation metrics (from `VariantSaturationAnalysis.ReplicaCount`). This prevents excessive scale-up when replicas are still starting up.
 
 **Example - Step 1 Output:**
 ```
 Model: llama-70b
 Variants:
-  - v1-l4 (cost=$5): current=2, ready=2, desired=0 → target=3 (cheapest, scaled up for capacity)
+  - v1-l4 (cost=$5): current=2, ready=2, desired=0 → target=3 (cheapest, scaled up for saturation)
   - v2-a100 (cost=$20): current=4, ready=3, desired=4 → target=4 (preserved desired)
 
 Note: v2-a100 has 4 current replicas but only 3 are ready (reporting metrics).
@@ -180,26 +181,26 @@ Note: v2-a100 has 4 current replicas but only 3 are ready (reporting metrics).
 
 ### Step 2: Arbitrate with Model-Based Optimizer (Optional)
 
-`ArbitrateWithModelBased(capacityAnalysis, capacityTargets, modelBasedTargets, variantStates) → []VariantDecision`
+`ArbitrateWithModelBased(saturationAnalysis, saturationTargets, modelBasedTargets, variantStates) → []VariantDecision`
 
 Only runs when model-based optimizer provides per-variant targets. Applies hybrid decision matrix:
 
-| Capacity Target | Model-Based Target | Final Decision | Reason |
+| Saturation Target | Model-Based Target | Final Decision | Reason |
 |----------------|-------------------|----------------|--------|
-| Scale-up (4) | Scale-down (2) | **No change** (veto) | Capacity veto: needs more capacity |
-| No change (3) | Scale-down (2) | **No change** (block) if unsafe | Safety block: capacity analysis says unsafe |
-| Scale-up (4) | No change (3) | **Scale-up to 4** | Capacity-driven: model-based doesn't object |
-| No change (3) | Scale-up (5) | **Scale-up to 5** | Model-based-driven: capacity allows |
-| No change (3) | Scale-down (2) | **Scale-down to 2** if safe | Model-based-driven: capacity approved |
+| Scale-up (4) | Scale-down (2) | **No change** (veto) | Saturation veto: needs more capacity |
+| No change (3) | Scale-down (2) | **No change** (block) if unsafe | Safety block: saturation analysis says unsafe |
+| Scale-up (4) | No change (3) | **Scale-up to 4** | Saturation-driven: model-based doesn't object |
+| No change (3) | Scale-up (5) | **Scale-up to 5** | Model-based-driven: saturation allows |
+| No change (3) | Scale-down (2) | **Scale-down to 2** if safe | Model-based-driven: saturation approved |
 
 **Key Principles:**
 1. **Ready replicas only** (Step 1): Use replicas reporting metrics to avoid scaling up for not-yet-ready pods
-2. **Preserve desired replicas** (Step 1): When desired ≠ current, always use desired as capacity target
+2. **Preserve desired replicas** (Step 1): When desired ≠ current, always use desired as saturation target
 3. **Cost-aware selection** (Step 1): Cheapest variant for scale-up, most expensive for scale-down
 4. **Deterministic tie-breaking** (Step 1): When variants have equal costs, alphabetically first for scale-up, last for scale-down
-5. **Capacity veto** (Step 2): Capacity needs override model-based scale-down suggestions
+5. **Saturation veto** (Step 2): Saturation needs override model-based scale-down suggestions
 6. **Safety block** (Step 2): Unsafe scale-down blocked regardless of model-based recommendation
-7. **Model-based priority** (Step 2): When capacity allows, follow model-based recommendations
+7. **Model-based priority** (Step 2): When saturation allows, follow model-based recommendations
 
 ## Usage Examples
 
@@ -208,24 +209,29 @@ Only runs when model-based optimizer provides per-variant targets. Applies hybri
 ```go
 import (
     "context"
-    "github.com/llm-d-incubation/workload-variant-autoscaler/internal/capacity"
-    controller "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector"
+    "github.com/llm-d-incubation/workload-variant-autoscaler/internal/saturation"
+    saturationmetrics "github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/saturation/metrics"
+    collectorv2 "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/v2"
     "github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
 )
 
 // Create analyzer
-analyzer := capacity.NewAnalyzer()
+analyzer := saturation.NewAnalyzer()
+
+// Create metrics registry and collector
+metricsRegistry := collectorv2.NewSourceRegistry()
+promSource := metricsRegistry.Get("prometheus") // assumes prometheus source is registered
+metricsCollector := saturationmetrics.NewReplicaMetricsCollector(promSource, k8sClient)
 
 // Collect metrics (uses max_over_time[1m] for safety-first analysis)
 // Note: Cost should be populated from CRD spec (default 10)
-metricsCollector := controller.NewCapacityMetricsCollector(promAPI)
-replicaMetrics, err := metricsCollector.CollectReplicaMetrics(ctx, modelID, namespace)
+replicaMetrics, err := metricsCollector.CollectReplicaMetrics(ctx, modelID, namespace, deployments, variantAutoscalings, variantCosts)
 
-// Get capacity config
-config := interfaces.DefaultCapacityScalingConfig()
+// Get saturation config
+config := interfaces.DefaultSaturationScalingConfig()
 
-// Analyze capacity across all variants
-analysis, err := analyzer.AnalyzeModelCapacity(ctx, modelID, namespace, replicaMetrics, config)
+// Analyze saturation across all variants
+analysis, err := analyzer.AnalyzeModelSaturation(ctx, modelID, namespace, replicaMetrics, config)
 
 // Build variant states (current replicas from pod count, desired from CRD status)
 variantStates := []interfaces.VariantReplicaState{
@@ -234,22 +240,22 @@ variantStates := []interfaces.VariantReplicaState{
 }
 
 // === STEP 1: Calculate saturation-based targets ===
-capacityTargets := analyzer.CalculateCapacityTargets(analysis, variantStates)
+saturationTargets := analyzer.CalculateSaturationTargets(analysis, variantStates)
 
-log.Printf("Capacity targets: %+v", capacityTargets)
+log.Printf("Saturation targets: %+v", saturationTargets)
 // Output: map[v1-l4:3 v2-a100:4]
-// - v1-l4: scaled to 3 (cheapest variant, capacity needs scale-up)
+// - v1-l4: scaled to 3 (cheapest variant, saturation needs scale-up)
 // - v2-a100: preserved at 4 (desired ≠ current)
 ```
 
 ### Step 1 Only: Saturation-Based Targets (No Model-Based Optimizer)
 
 ```go
-// Calculate capacity targets
-capacityTargets := analyzer.CalculateCapacityTargets(analysis, variantStates)
+// Calculate saturation targets
+saturationTargets := analyzer.CalculateSaturationTargets(analysis, variantStates)
 
 // Convert to decisions and apply
-for variantName, target := range capacityTargets {
+for variantName, target := range saturationTargets {
     state := getVariantState(variantName, variantStates) // helper function
 
     if target > state.CurrentReplicas {
@@ -268,7 +274,7 @@ for variantName, target := range capacityTargets {
 
 ```go
 // === STEP 1: Calculate saturation-based targets ===
-capacityTargets := analyzer.CalculateCapacityTargets(analysis, variantStates)
+saturationTargets := analyzer.CalculateSaturationTargets(analysis, variantStates)
 
 // === Get model-based optimizer targets (from your optimizer) ===
 modelBasedTargets := map[string]int{
@@ -276,10 +282,10 @@ modelBasedTargets := map[string]int{
     "v2-a100": 2,  // optimizer wants to scale down v2-a100
 }
 
-// === STEP 2: Arbitrate between capacity and model-based ===
+// === STEP 2: Arbitrate between saturation and model-based ===
 decisions := analyzer.ArbitrateWithModelBased(
     analysis,
-    capacityTargets,
+    saturationTargets,
     modelBasedTargets,
     variantStates,
 )
@@ -288,13 +294,13 @@ decisions := analyzer.ArbitrateWithModelBased(
 for _, decision := range decisions {
     log.Printf("Variant: %s", decision.VariantName)
     log.Printf("  Current: %d", decision.CurrentReplicas)
-    log.Printf("  Capacity target: %d", capacityTargets[decision.VariantName])
+    log.Printf("  Saturation target: %d", saturationTargets[decision.VariantName])
     log.Printf("  Model-based target: %d", modelBasedTargets[decision.VariantName])
     log.Printf("  Final target: %d", decision.TargetReplicas)
     log.Printf("  Reason: %s", decision.Reason)
 
     if decision.SafetyOverride {
-        log.Printf("  ⚠️  Capacity safety override applied")
+        log.Printf("  ⚠️  Saturation safety override applied")
     }
 
     switch decision.Action {
@@ -334,7 +340,7 @@ replicaMetrics := []interfaces.ReplicaMetrics{
 }
 
 // Analyzer aggregates across all 5 replicas
-analysis, _ := analyzer.AnalyzeModelCapacity(ctx, "llama-70b", "prod", replicaMetrics, config)
+analysis, _ := analyzer.AnalyzeModelSaturation(ctx, "llama-70b", "prod", replicaMetrics, config)
 
 // Results include per-variant breakdown with cost
 fmt.Printf("Total replicas: %d\n", analysis.TotalReplicas) // 5
@@ -347,11 +353,11 @@ for _, va := range analysis.VariantAnalyses {
     // Note: va.ReplicaCount = ready replicas (those reporting metrics)
 }
 
-// If capacity needs scale-up and no optimizer guidance:
+// If saturation needs scale-up and no optimizer guidance:
 // → variant-2 (H100) will be scaled up (cheaper at $15 vs $20)
 // → Target = readyReplicas + 1 (prevents excessive scale-up for not-yet-ready pods)
 //
-// If capacity allows scale-down in capacity-only mode:
+// If saturation allows scale-down in saturation-only mode:
 // → variant-1 (A100) will be scaled down (more expensive at $20)
 ```
 
@@ -363,7 +369,7 @@ Saturation scaling thresholds are configured via ConfigMap (see [saturation-scal
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: capacity-scaling-config
+  name: saturation-scaling-config
   namespace: workload-variant-autoscaler-system
 data:
   default: |
@@ -384,10 +390,10 @@ data:
 
 ## Testing
 
-Comprehensive unit tests are provided in `internal/capacity/analyzer_test.go`:
+Comprehensive unit tests are provided in `internal/saturation/analyzer_test.go`:
 
 ```bash
-cd internal/capacity
+cd internal/saturation
 go test -v
 ```
 
@@ -395,7 +401,7 @@ go test -v
 - ✅ Scale-up trigger conditions
 - ✅ Scale-down safety simulation (total load redistribution)
 - ✅ Multi-variant aggregation
-- ✅ **Step 1: CalculateCapacityTargets**
+- ✅ **Step 1: CalculateSaturationTargets**
   - ✅ Scale-up cheapest variant
   - ✅ Scale-down most expensive variant
   - ✅ Preserve desired replicas (desired ≠ current)
@@ -403,11 +409,11 @@ go test -v
   - ✅ Equal costs with deterministic tie-breaking
   - ✅ Scale-down below minimum (prevents scaling to 0)
 - ✅ **Step 2: ArbitrateWithModelBased**
-  - ✅ Capacity veto (capacity wants up, model-based wants down)
+  - ✅ Saturation veto (saturation wants up, model-based wants down)
   - ✅ Safety block (model-based wants down, but unsafe)
-  - ✅ Follow model-based (when capacity allows)
-  - ✅ Capacity-driven (capacity needs scale-up)
-  - ✅ Both capacity and model-based agree
+  - ✅ Follow model-based (when saturation allows)
+  - ✅ Saturation-driven (saturation needs scale-up)
+  - ✅ Both saturation and model-based agree
   - ✅ Nil analysis safety
 - ✅ Saturated replica identification
 - ✅ Edge cases (empty metrics, single replica, nil analysis)
@@ -449,13 +455,13 @@ INFO Saturation decision arbitrated
   modelBasedReplicas=2
   action=no-change
   targetReplicas=3
-  reason=capacity veto: KV spare capacity low (model-based wanted scale-down to 2)
+  reason=saturation veto: KV spare capacity low (model-based wanted scale-down to 2)
   safetyOverride=true
 ```
 
-**Capacity target calculation (Step 1):**
+**Saturation target calculation (Step 1):**
 ```
-INFO Capacity target: scale-up cheapest variant
+INFO Saturation target: scale-up cheapest variant
   variant=v1-l4
   cost=5.00
   currentReplicas=2     (total replicas per CRD)
@@ -469,11 +475,11 @@ INFO Capacity target: scale-up cheapest variant
 INFO Variant decision arbitrated
   variant=v1-l4
   current=2
-  capacityTarget=3
+  saturationTarget=3
   modelBasedTarget=2
   action=no-change
   targetReplicas=3
-  reason=capacity veto: capacity needs scale-up (capacity=3, model-based=2)
+  reason=saturation veto: saturation needs scale-up (saturation=3, model-based=2)
 ```
 
 ## Performance Characteristics
@@ -501,19 +507,21 @@ INFO Variant decision arbitrated
 The saturation analyzer is integrated into the controller's reconciliation loop using the two-step architecture:
 
 1. **Collect metrics** for all pods of a model (across all variants)
-   - Enrich with cost from CRD spec (default: 10)
+   - Uses v2 collector infrastructure with registered query templates
+   - Enriches with cost from CRD spec (default: 10)
+   - Filters stale metrics (default: 2 minutes staleness threshold)
 
-2. **Analyze capacity** using `AnalyzeModelCapacity`
+2. **Analyze saturation** using `AnalyzeModelSaturation`
    - Aggregates metrics across all variants
-   - Produces `ModelCapacityAnalysis` with per-variant breakdown and cost
+   - Produces `ModelSaturationAnalysis` with per-variant breakdown and cost
 
 3. **Build variant states** with current and desired replicas
    - Current replicas: from actual pod count
    - Desired replicas: from CRD status field (previous optimizer run), 0 if not set
 
-4. **STEP 1: Calculate capacity targets** using `CalculateCapacityTargets`
+4. **STEP 1: Calculate saturation targets** using `CalculateSaturationTargets`
    - Preserves desired replicas when desired ≠ current
-   - Uses cost-based selection (cheapest/most expensive) for capacity actions
+   - Uses cost-based selection (cheapest/most expensive) for saturation actions
    - Returns `map[variantName]targetReplicas`
 
 5. **STEP 2: Arbitrate with model-based optimizer** (if available)
