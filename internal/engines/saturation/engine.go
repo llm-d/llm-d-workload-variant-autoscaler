@@ -511,14 +511,21 @@ func (e *Engine) applySaturationDecisions(
 			// Now we just don't update status with it.
 		}
 
-		// Copy MetricsAvailable condition from local analysis (set during metrics collection)
-		// This condition was set on `va` but we fetched a fresh `updateVa` from API server
-		if metricsCondition := llmdVariantAutoscalingV1alpha1.GetCondition(va, llmdVariantAutoscalingV1alpha1.TypeMetricsAvailable); metricsCondition != nil {
+		// Set MetricsAvailable condition based on whether we have metrics data for this VA.
+		// Metrics are available if we have an allocation (from metrics collection) or a decision (from saturation analysis).
+		_, hasAllocation := currentAllocations[vaName]
+		if hasAllocation || hasDecision {
 			llmdVariantAutoscalingV1alpha1.SetCondition(&updateVa,
 				llmdVariantAutoscalingV1alpha1.TypeMetricsAvailable,
-				metricsCondition.Status,
-				metricsCondition.Reason,
-				metricsCondition.Message)
+				metav1.ConditionTrue,
+				"MetricsCollected",
+				"Saturation metrics are being collected from Prometheus")
+		} else {
+			llmdVariantAutoscalingV1alpha1.SetCondition(&updateVa,
+				llmdVariantAutoscalingV1alpha1.TypeMetricsAvailable,
+				metav1.ConditionFalse,
+				"MetricsUnavailable",
+				"No saturation metrics available - pods may not be ready or metrics not yet scraped")
 		}
 
 		// Determine target replicas and accelerator
