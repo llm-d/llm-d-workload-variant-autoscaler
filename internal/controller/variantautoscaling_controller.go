@@ -192,11 +192,14 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 		// Note: We blindly apply for now, assuming the Engine acts as the source of truth for "Desired" state
 		numReplicas, accelerator, lastRunTime := common.DecisionToOptimizedAlloc(decision)
 
-		va.Status.DesiredOptimizedAlloc.NumReplicas = numReplicas
-		va.Status.DesiredOptimizedAlloc.Accelerator = accelerator
-		va.Status.DesiredOptimizedAlloc.LastRunTime = lastRunTime
+		// Only update DesiredOptimizedAlloc if we have valid values (accelerator is required by CRD)
+		if accelerator != "" && numReplicas > 0 {
+			va.Status.DesiredOptimizedAlloc.NumReplicas = numReplicas
+			va.Status.DesiredOptimizedAlloc.Accelerator = accelerator
+			va.Status.DesiredOptimizedAlloc.LastRunTime = lastRunTime
+		}
 
-		// Apply MetricsAvailable condition from cache
+		// Always apply MetricsAvailable condition from cache
 		metricsStatus := metav1.ConditionFalse
 		if decision.MetricsAvailable {
 			metricsStatus = metav1.ConditionTrue
