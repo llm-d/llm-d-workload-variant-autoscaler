@@ -18,6 +18,8 @@ The Workload-Variant-Autoscaler (WVA) is a Kubernetes controller that performs i
 
 ## Quick Start
 
+New to WVA? Follow our **[10-minute Quick Start Guide](docs/quickstart.md)** to get up and running!
+
 ### Prerequisites
 
 - Kubernetes v1.31.0+ (or OpenShift 4.18+)
@@ -34,7 +36,7 @@ helm upgrade -i workload-variant-autoscaler ./charts/workload-variant-autoscaler
   --set variantAutoscaling.accelerator=L40S \
   --set variantAutoscaling.modelID=unsloth/Meta-Llama-3.1-8B \
   --set vllmService.enabled=true \
-  --set vllmService.nodePort=30000
+  --set vllmService.nodePort=30000 \
   --create-namespace
 ```
 
@@ -54,7 +56,10 @@ make deploy-llm-d-wva-emulated-on-kind
 **Works on Mac (Apple Silicon/Intel) and Windows** - no physical GPUs needed!
 Perfect for development and testing with GPU emulation.
 
-See the [Installation Guide](docs/user-guide/installation.md) for detailed instructions.
+📖 **Next Steps:**
+- [Quick Start Guide](docs/quickstart.md) - Complete walkthrough
+- [Installation Guide](docs/user-guide/installation.md) - Detailed installation options
+- [FAQ](docs/user-guide/faq.md) - Common questions answered
 
 ## Documentation
 

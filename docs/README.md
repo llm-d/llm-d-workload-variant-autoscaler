@@ -44,10 +44,19 @@ Understanding how WVA works:
 Contributing to WVA:
 
 - **[Development Setup](developer-guide/development.md)** - Setting up your dev environment
+- **[Package Documentation](developer-guide/package-documentation.md)** - Understanding the codebase structure
 - **[Testing](developer-guide/testing.md)** - Running tests and CI workflows
 - **[Agentic Workflows](developer-guide/agentic-workflows.md)** - AI-powered automation workflows
 - **[Debugging](developer-guide/debugging.md)** - Debugging techniques and tools
 - **[Contributing](../CONTRIBUTING.md)** - How to contribute to the project
+
+## Getting Started
+
+New to WVA? Start here:
+
+- **[Quick Start Guide](quickstart.md)** - Get running in 10 minutes
+- **[Installation Guide](user-guide/installation.md)** - Detailed installation instructions
+- **[Quick Start Demo](tutorials/demo.md)** - Step-by-step walkthrough
 
 ## Quick Links
 
@@ -56,17 +65,31 @@ Contributing to WVA:
 - [OpenShift Deployment](../deploy/openshift/README.md)
 - [Local Development with Kind Emulator](../deploy/kind-emulator/README.md)
 
+## Key Topics
+
+### Core Concepts
+- [Saturation-Based Scaling](saturation-scaling-config.md) - Understanding the optimization model
+- [Saturation Analyzer](saturation-analyzer.md) - Deep dive into saturation analysis
+- [Metrics & Health Monitoring](metrics-health-monitoring.md) - Monitor WVA performance
+
+### Advanced Topics
+- [Parameter Estimation](tutorials/parameter-estimation.md) - Tuning for your models
+- [Cost Optimization](user-guide/configuration.md#cost-optimization) - Minimizing infrastructure costs
+- [Multi-Tenant Deployments](user-guide/multi-controller-isolation.md) - Large-scale architecture
+
 ## Additional Resources
 
 - [Community Proposal](https://docs.google.com/document/d/1n6SAhloQaoSyF2k3EveIOerT-f97HuWXTLFm07xcvqk/edit)
 - [llm-d Infrastructure](https://github.com/llm-d-incubation/llm-d-infra)
 - [API Proposal](https://docs.google.com/document/d/1j2KRAT68_FYxq1iVzG0xVL-DHQhGVUZBqiM22Hd_0hc/edit)
+- [Design Discussions](https://docs.google.com/document/d/1iGHqdxRUDpiKwtJFr5tMCKM7RF6fbTfZBL7BTn6UkwA/edit?tab=t.0#heading=h.mdte0lq44ul4)
 
 ## Need Help?
 
-- Check the [FAQ](user-guide/faq.md) (coming soon)
+- Check the [FAQ](user-guide/faq.md)
+- Review the [Troubleshooting Guide](user-guide/troubleshooting.md)
 - Open a [GitHub Issue](https://github.com/llm-d-incubation/workload-variant-autoscaler/issues)
-- Join community meetings
+- Join [community meetings](https://join.slack.com/share/enQtOTg1MzkwODExNDI5Mi02NWQwOWEwOWM4Y2Y3MTc4OTQyY2Y1ZDVlZmU2MjBmZDUwNjJhZGM3MjY4ZTQ5OTdjZjgzMmI0NjI0ZTBhZTM4)
 
 ---
 
