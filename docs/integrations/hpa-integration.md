@@ -184,6 +184,10 @@ It can be verified that the workload-variant-autoscaler is optimizing and emitti
 ```sh
 kubectl logs -n workload-variant-autoscaler-system deploy/workload-variant-autoscaler-controller-manager
 
+### Example Debug Logs
+
+> **Note:** The log examples below show internal optimizer data structures from an older version that used model-based scaling. Current versions use saturation-based scaling with different internal representations. The log format and structures shown here are for illustrative purposes and may not match current implementation.
+
 ###
 2025-08-22T18:47:50.131850600Z {"level":"DEBUG","ts":"2025-08-22T18:47:50.131Z","msg":"System data prepared for optimization: - { accelerators: [  {   name: G2,   type: Intel-Gaudi-2-96GB,   multiplicity: 1,   memSize: 0,   memBW: 0,   power: {    idle: 0,    full: 0,    midPower: 0,    midUtil: 0   },   cost: 23  },  {   name: MI300X,   type: AMD-MI300X-192GB,   multiplicity: 1,   memSize: 0,   memBW: 0,   power: {    idle: 0,    full: 0,    midPower: 0,    midUtil: 0   },   cost: 65  },  {   name: A100,   type: NVIDIA-A100-PCIE-80GB,   multiplicity: 1,   memSize: 0,   memBW: 0,   power: {    idle: 0,    full: 0,    midPower: 0,    midUtil: 0   },   cost: 40  } ]}"}
 2025-08-22T18:47:50.131912017Z {"level":"DEBUG","ts":"2025-08-22T18:47:50.131Z","msg":"System data prepared for optimization: - { serviceClasses: [  {   name: Premium,   model: default/default,   priority: 1,   slo-itl: 24,   slo-ttw: 500,   slo-tps: 0  },  {   name: Premium,   model: llama0-70b,   priority: 1,   slo-itl: 80,   slo-ttw: 500,   slo-tps: 0  },  {   name: Freemium,   model: granite-13b,   priority: 10,   slo-itl: 200,   slo-ttw: 2000,   slo-tps: 0  },  {   name: Freemium,   model: llama0-7b,   priority: 10,   slo-itl: 150,   slo-ttw: 1500,   slo-tps: 0  } ]}"}

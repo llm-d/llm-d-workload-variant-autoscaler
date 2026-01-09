@@ -209,6 +209,10 @@ It can be verified that the workload-variant-autoscaler is optimizing and emitti
 ```sh
 kubectl logs -n workload-variant-autoscaler-system deploy/workload-variant-autoscaler-controller-manager
 
+### Example Debug Logs
+
+> **Note:** The log examples below show internal optimizer data structures from an older version that used model-based scaling. Current versions use saturation-based scaling with different internal representations. The log format and structures shown here are for illustrative purposes and may not match current implementation.
+
 ###
 2025-09-12T17:03:42.153155510Z {"level":"DEBUG","ts":"2025-09-12T17:03:42.152Z","msg":"Found inventory: nodeName - kind-inferno-gpu-cluster-control-plane , model - NVIDIA-A100-PCIE-80GB , count - 2 , mem - 81920"}
 2025-09-12T17:03:42.153174593Z {"level":"DEBUG","ts":"2025-09-12T17:03:42.153Z","msg":"Found inventory: nodeName - kind-inferno-gpu-cluster-worker , model - AMD-MI300X-192G , count - 2 , mem - 196608"}

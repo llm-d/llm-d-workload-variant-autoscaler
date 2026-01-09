@@ -25,7 +25,7 @@ type VariantAutoscalingSpec struct {
 }
 
 // VariantAutoscalingStatus represents the current status of autoscaling for a variant,
-// including the current allocation, desired optimized allocation, and actuation status.
+// including the desired optimized allocation and actuation status.
 type VariantAutoscalingStatus struct {
 
 	// DesiredOptimizedAlloc indicates the target optimized allocation based on autoscaling logic.
