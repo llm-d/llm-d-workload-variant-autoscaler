@@ -195,6 +195,17 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 		va.Status.DesiredOptimizedAlloc.Accelerator = accelerator
 		va.Status.DesiredOptimizedAlloc.LastRunTime = lastRunTime
 
+		// Apply MetricsAvailable condition from cache
+		metricsStatus := metav1.ConditionFalse
+		if decision.MetricsAvailable {
+			metricsStatus = metav1.ConditionTrue
+		}
+		llmdVariantAutoscalingV1alpha1.SetCondition(&va,
+			llmdVariantAutoscalingV1alpha1.TypeMetricsAvailable,
+			metricsStatus,
+			decision.MetricsReason,
+			decision.MetricsMessage)
+
 		// Note: CurrentAlloc is removed from Status.
 		// Internal allocation state is managed by the Engine and Actuator.
 	} else {

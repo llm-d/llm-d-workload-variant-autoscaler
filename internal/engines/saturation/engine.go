@@ -511,22 +511,8 @@ func (e *Engine) applySaturationDecisions(
 			// Now we just don't update status with it.
 		}
 
-		// Set MetricsAvailable condition based on whether we have metrics data for this VA.
-		// Metrics are available if we have an allocation (from metrics collection) or a decision (from saturation analysis).
+		// Check if we have metrics data for this VA (used for cache below)
 		_, hasAllocation := currentAllocations[vaName]
-		if hasAllocation || hasDecision {
-			llmdVariantAutoscalingV1alpha1.SetCondition(&updateVa,
-				llmdVariantAutoscalingV1alpha1.TypeMetricsAvailable,
-				metav1.ConditionTrue,
-				"MetricsAvailable",
-				"Saturation metrics data is available for scaling decisions")
-		} else {
-			llmdVariantAutoscalingV1alpha1.SetCondition(&updateVa,
-				llmdVariantAutoscalingV1alpha1.TypeMetricsAvailable,
-				metav1.ConditionFalse,
-				"MetricsUnavailable",
-				"No saturation metrics available - pods may not be ready or metrics not yet scraped")
-		}
 
 		// Determine target replicas and accelerator
 		var targetReplicas int
@@ -634,6 +620,15 @@ func (e *Engine) applySaturationDecisions(
 		// This avoids any API server interaction from the Engine.
 
 		// 1. Update Cache
+		// Determine MetricsAvailable status for the cache
+		metricsAvailable := hasAllocation || hasDecision
+		metricsReason := "MetricsUnavailable"
+		metricsMessage := "No saturation metrics available - pods may not be ready or metrics not yet scraped"
+		if metricsAvailable {
+			metricsReason = "MetricsAvailable"
+			metricsMessage = "Saturation metrics data is available for scaling decisions"
+		}
+
 		common.DecisionCache.Set(va.Name, va.Namespace, interfaces.VariantDecision{
 			VariantName:       vaName,
 			Namespace:         va.Namespace,
@@ -641,7 +636,9 @@ func (e *Engine) applySaturationDecisions(
 			AcceleratorName:   acceleratorName,
 			LastRunTime:       metav1.Now(),
 			CurrentAllocation: currentAllocations[vaName],
-			// Pass other fields if needed, but these are crucial for Status
+			MetricsAvailable:  metricsAvailable,
+			MetricsReason:     metricsReason,
+			MetricsMessage:    metricsMessage,
 		})
 
 		// 2. Trigger Reconciler

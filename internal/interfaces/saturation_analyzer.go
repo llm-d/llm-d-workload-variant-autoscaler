@@ -87,9 +87,14 @@ type VariantDecision struct {
 
 	// CurrentAllocation carries the collected metrics/allocation state
 	// This helps the Controller update status without re-collecting metrics
-	// CurrentAllocation carries the collected metrics/allocation state
-	// This helps the Controller update status without re-collecting metrics
 	CurrentAllocation *Allocation
+
+	// MetricsAvailable indicates whether saturation metrics were available for this decision
+	MetricsAvailable bool
+	// MetricsReason is the reason for the MetricsAvailable condition
+	MetricsReason string
+	// MetricsMessage is the human-readable message for the MetricsAvailable condition
+	MetricsMessage string
 }
 
 // SaturationAction represents the scaling action
