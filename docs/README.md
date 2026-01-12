@@ -28,7 +28,8 @@ Integration with other systems:
 
 - **[HPA Integration](integrations/hpa-integration.md)** - Using WVA with Horizontal Pod Autoscaler
 - **[KEDA Integration](integrations/keda-integration.md)** - Using WVA with KEDA
-- **[Prometheus Integration](integrations/prometheus.md)** - Custom metrics and monitoring
+- **[Prometheus Integration](integrations/prometheus.md)** - Prometheus setup and configuration
+- **[Custom Metrics Reference](integrations/custom-metrics.md)** - WVA metrics for monitoring and autoscaling
 
 ### Design & Architecture
 
@@ -64,7 +65,7 @@ Contributing to WVA:
 
 ## Need Help?
 
-- Check the [FAQ](user-guide/faq.md) (coming soon)
+- Check the [FAQ](user-guide/faq.md) for common questions
 - Open a [GitHub Issue](https://github.com/llm-d-incubation/workload-variant-autoscaler/issues)
 - Join community meetings
 

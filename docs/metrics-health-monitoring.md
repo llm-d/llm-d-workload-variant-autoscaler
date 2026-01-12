@@ -130,6 +130,7 @@ When metrics are unavailable, WVA implements graceful degradation:
 
 ## Related Documentation
 
-- [Custom Metrics](./custom-metrics.md)
+- [Custom Metrics Reference](./integrations/custom-metrics.md)
+- [Prometheus Integration](./integrations/prometheus.md)
 - [ServiceMonitor Configuration](../config/prometheus)
 
