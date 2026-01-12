@@ -169,6 +169,10 @@ helm upgrade workload-variant-autoscaler ./charts/workload-variant-autoscaler \
 ### Breaking Changes
 
 #### v0.5.0 (upcoming)
+- **⚠️ BREAKING: Removed `modelProfile` field**: The deprecated `spec.modelProfile` field has been removed from the VariantAutoscaling CRD. This field was never part of the actual CRD schema and caused validation errors. 
+  - **Action Required**: Remove any `modelProfile` sections from your VariantAutoscaling YAML files before upgrading
+  - **Valid Fields**: Only `scaleTargetRef`, `modelID`, and `variantCost` are supported
+  - See [CHANGELOG-v0.5.0](docs/CHANGELOG-v0.5.0.md#breaking-changes) for migration details
 - **VariantAutoscaling CRD**: Added `scaleTargetRef` field to explicitly specify the target deployment. If not set, the controller infers the target from the `modelID` field.
 
 ### Verifying CRD Version

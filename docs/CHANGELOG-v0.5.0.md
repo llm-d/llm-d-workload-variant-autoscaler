@@ -169,21 +169,67 @@ query := fmt.Sprintf(`vllm_kv_cache_usage{namespace="%s"}`, escapedNamespace)
 
 ## Breaking Changes
 
-None. This release is fully backward compatible with v0.4.x.
+### Removed `modelProfile` Field from VariantAutoscaling CRD
+
+**Impact:** The `modelProfile` field has been removed from the VariantAutoscaling CRD specification as it was never part of the actual CRD schema and caused validation errors.
+
+**What Was Removed:**
+- `spec.modelProfile` field and all its nested accelerator configuration
+- Performance parameters (alpha, beta, gamma, delta) for model-based optimization
+- Accelerator-specific configurations in VariantAutoscaling resources
+
+**Current Supported Fields:**
+```yaml
+spec:
+  scaleTargetRef:     # Required - target deployment reference
+    kind: Deployment
+    name: my-deployment
+  modelID: "..."      # Required - model identifier
+  variantCost: "10.0" # Optional - cost per replica (default: "10.0")
+```
+
+**Migration Required:**
+If you have VariantAutoscaling resources with `modelProfile` fields, remove them before upgrading:
+
+```bash
+# Check for resources with modelProfile
+kubectl get va -A -o yaml | grep -A 5 modelProfile
+
+# Edit and remove modelProfile sections
+kubectl edit va <resource-name> -n <namespace>
+```
+
+**Why This Change:**
+- The `modelProfile` field was never defined in the CRD schema (api/v1alpha1/variantautoscaling_types.go)
+- Kubernetes rejected resources containing this undefined field
+- The model-based optimization feature that would have used these parameters is not currently implemented
+- Current implementation uses saturation-based scaling, which doesn't require performance profiling
+
+**References:**
+- PR #564: Remove deprecated modelProfile field
+- Issue #563: Helm chart contains deprecated VA CRD fields
+- Deprecation notice: [Parameter Estimation Tutorial](tutorials/parameter-estimation.md)
 
 ## Upgrade Notes
 
-1. **Pending Replicas Tracking:**
+1. **⚠️ REQUIRED: Remove `modelProfile` Field:**
+   - **Action Required:** Review and update all VariantAutoscaling resources before upgrading
+   - Remove any `spec.modelProfile` sections from your YAML manifests
+   - Verify resources after upgrade: `kubectl get va -A -o yaml | grep modelProfile`
+   - If found, edit and remove the field: `kubectl edit va <name> -n <namespace>`
+   - See "Breaking Changes" section above for details
+
+2. **Pending Replicas Tracking:**
    - Automatically enabled, no configuration required
    - May observe different scaling behavior during pod startup periods
    - This is expected and prevents over-provisioning
 
-2. **Prometheus Configuration:**
+3. **Prometheus Configuration:**
    - Existing ConfigMap configuration continues to work
    - Consider migrating to environment variables for better secret management
    - See [Prometheus Integration docs](integrations/prometheus.md)
 
-3. **Security:**
+4. **Security:**
    - PromQL injection prevention is automatic
    - No action required, but validates multi-tenant deployment security
 
