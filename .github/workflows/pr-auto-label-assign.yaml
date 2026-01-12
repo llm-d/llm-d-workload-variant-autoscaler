@@ -1,0 +1,116 @@
+# Automatically label PRs based on changed files and assign expert reviewers
+name: "PR Auto Label and Assign"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    outputs:
+      labels: ${{ steps.labeler.outputs.all-labels }}
+    steps:
+      - name: Apply labels based on changed files
+        id: labeler
+        uses: actions/labeler@v5
+        with:
+          configuration-path: .github/pr-labeler.yml
+          sync-labels: false
+
+  assign-reviewers:
+    runs-on: ubuntu-latest
+    needs: label
+    # Don't assign reviewers to bot PRs or draft PRs
+    if: |
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login != 'github-actions[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    steps:
+      - name: Assign reviewers based on labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prAuthor = context.payload.pull_request.user.login;
+            const prNumber = context.payload.pull_request.number;
+
+            // Get current labels on the PR
+            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+
+            const labelNames = labels.map(l => l.name);
+            console.log('PR labels:', labelNames);
+
+            // Define reviewers for each area (excluding PR author)
+            const areaReviewers = {
+              'area/api': ['asm582', 'WheelyMcBones'],
+              'area/controller': ['asm582', 'WheelyMcBones'],
+              'area/engine': ['lionelvillard', 'asm582'],
+              'area/collector': ['lionelvillard', 'asm582'],
+              'area/saturation': ['ev-shindin', 'asm582'],
+              'area/ci': ['clubanderson'],
+              'area/e2e': ['clubanderson', 'asm582'],
+              'area/charts': ['clubanderson', 'asm582'],
+              'area/deploy': ['clubanderson', 'asm582'],
+              'kind/docs': []  // Docs PRs don't need reviewers auto-assigned
+            };
+
+            // Collect unique reviewers based on labels
+            const reviewersSet = new Set();
+
+            for (const label of labelNames) {
+              const reviewers = areaReviewers[label] || [];
+              for (const reviewer of reviewers) {
+                // Don't add PR author as reviewer
+                if (reviewer.toLowerCase() !== prAuthor.toLowerCase()) {
+                  reviewersSet.add(reviewer);
+                }
+              }
+            }
+
+            // Convert to array and limit to 2 reviewers
+            let reviewers = Array.from(reviewersSet).slice(0, 2);
+
+            if (reviewers.length === 0) {
+              console.log('No reviewers to assign for these labels');
+              return;
+            }
+
+            console.log('Assigning reviewers:', reviewers);
+
+            // Get current reviewers to avoid re-requesting
+            const { data: currentReviewers } = await github.rest.pulls.listRequestedReviewers({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+
+            const currentReviewerLogins = currentReviewers.users.map(u => u.login.toLowerCase());
+
+            // Filter out already requested reviewers
+            reviewers = reviewers.filter(r => !currentReviewerLogins.includes(r.toLowerCase()));
+
+            if (reviewers.length === 0) {
+              console.log('All reviewers already requested');
+              return;
+            }
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                reviewers: reviewers
+              });
+              console.log('Successfully assigned reviewers:', reviewers);
+            } catch (error) {
+              console.log('Error assigning reviewers:', error.message);
+              // Don't fail the workflow if reviewer assignment fails
+            }

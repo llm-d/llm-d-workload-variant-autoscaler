@@ -1,0 +1,59 @@
+# PR Labeler configuration
+# Maps file patterns to labels
+
+area/api:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'api/**'
+          - 'config/crd/**'
+
+area/controller:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/controller/**'
+
+area/engine:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/engines/**'
+
+area/collector:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/collector/**'
+
+area/saturation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/saturation/**'
+
+area/ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**'
+          - '.github/*.yml'
+          - '.github/*.yaml'
+
+area/e2e:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'test/e2e/**'
+          - 'test/e2e-openshift/**'
+          - 'test/e2e-saturation-based/**'
+
+area/charts:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'charts/**'
+
+area/deploy:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'deploy/**'
+
+kind/docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - '**/*.md'
+          - '**/*.mdx'
