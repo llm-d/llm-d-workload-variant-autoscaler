@@ -35,3 +35,19 @@ jobs:
             /hold
             /cc
             /uncc"
+
+  # Add approved label when /approve is commented
+  add-approved-label:
+    runs-on: ubuntu-latest
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/approve')
+    steps:
+      - name: Add approved label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['approved']
+            });
