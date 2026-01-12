@@ -4,7 +4,47 @@ This document details the key changes and improvements introduced in WVA v0.5.0,
 
 ## Major Features
 
-### 1. Pending Replica Awareness & Cascade Scaling Prevention
+### 1. Model-Level Transition Protection
+
+**Problem Solved:**
+The saturation analyzer could make scaling decisions based on incomplete capacity data when variants were in transition states (scaling operations in progress, pods starting up).
+
+**Solution:**
+WVA now implements model-level transition protection that blocks ALL scaling decisions for a model when ANY variant is transitioning.
+
+**Technical Details:**
+- A variant is considered **transitioning** if:
+  1. `desired ≠ 0 AND desired ≠ current` (scaling operation in progress)
+  2. `metrics count ≠ current replicas` (pods not yet reporting metrics)
+- When ANY variant is transitioning, the entire model enters a blocked state
+- All variants preserve their current or desired replica counts
+- No new scaling decisions are made until all variants reach steady state
+
+**Why This Matters:**
+- ✅ Prevents oscillating scale decisions during cluster state changes
+- ✅ Ensures capacity calculations use complete, stable metrics
+- ✅ Avoids race conditions when multiple variants scale simultaneously
+- ✅ Maintains predictable autoscaling behavior during deployments
+
+**Example Scenario:**
+```
+Model: llama-8b with variants v1 (expensive) and v2 (cheap)
+- v1: desired=4, current=2, metrics=2 → Transitioning
+- v2: current=2, saturation detected → Would normally scale up (cheapest)
+
+Result: v2 scale-up is BLOCKED because v1 is transitioning
+Both variants wait until v1 reaches steady state (current=4, metrics=4)
+```
+
+**Documentation:**
+- [Saturation Analyzer - Model-Level Transition Protection](saturation-analyzer.md#model-level-transition-protection)
+- [Example: Transition Protection](saturation-analyzer.md#example-model-level-transition-protection)
+
+**Tests:**
+- `TestCalculateSaturationTargets_ModelLevelTransitionBlocking` - Desired vs current mismatch
+- `TestCalculateSaturationTargets_MetricsMismatchBlocksScaling` - Metrics vs current mismatch
+
+### 2. Pending Replica Awareness & Cascade Scaling Prevention
 
 **Problem Solved:**
 Previously, the saturation engine could repeatedly trigger scale-up for the same variant before previous scale-up operations completed, leading to over-provisioning.

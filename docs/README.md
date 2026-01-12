@@ -34,6 +34,8 @@ Integration with other systems:
 
 Understanding how WVA works:
 
+- **[Saturation Analyzer](saturation-analyzer.md)** - Fast, reactive saturation-based autoscaling with model-level transition protection
+- **[Saturation Scaling Configuration](saturation-scaling-config.md)** - Configuring saturation-based scaling thresholds
 - **[Modeling & Optimization](design/modeling-optimization.md)** - Queue theory models and optimization algorithms
 - **[Controller Behavior](design/controller-behavior.md)** - Event handling and reconciliation behavior
 - **[Architecture Limitations](design/architecture-limitations.md)** - **Important:** Model architecture assumptions and limitations (READ THIS if using HSSM, MoE, or non-standard architectures)

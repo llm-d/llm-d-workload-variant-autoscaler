@@ -14,6 +14,7 @@ The Saturation Analyzer is a **fast, reactive, and safe saturation guardrail** t
 - ✅ Makes **per-variant** target replica calculations with cost-awareness
 - ✅ Uses ready replicas (those reporting metrics) to avoid excessive scale-up
 - ✅ **Prevents cascade scaling** by blocking scale-up when replicas are pending
+- ✅ **Model-level transition protection** blocks all scaling when ANY variant is transitioning
 - ✅ Preserves desired replicas from previous optimizer runs (in Step 1)
 - ✅ Arbitrates with model-based optimizer targets (in Step 2) using safety overrides
 - ✅ Analyzes capacity across all variants of the same model
@@ -157,7 +158,25 @@ N_non_sat >= 2
 
 `CalculateCapacityTargets(capacityAnalysis, variantStates) → map[variantName]targetReplicas`
 
-For each variant, determines target replicas based on **capacity needs only**:
+For each variant, determines target replicas based on **capacity needs only**.
+
+#### Model-Level Transition Protection
+
+**Before making any scaling decisions**, the analyzer checks if the model is in a transition state. A model is considered **transitioning** if ANY variant meets either condition:
+
+1. **Desired vs Current mismatch**: `desired ≠ 0 AND desired ≠ current`
+   - Indicates a previous scaling operation is still in progress
+   - The desired replicas (from CRD status) don't match actual running replicas
+
+2. **Metrics vs Current mismatch**: `metrics count ≠ current replicas`
+   - Some pods exist but are not yet reporting metrics
+   - Pods are still starting up (container init, model loading, health checks)
+
+**When ANY variant is transitioning, ALL scaling decisions for the entire model are blocked.** This prevents making decisions based on incomplete capacity data during cluster state changes.
+
+#### Scaling Decision Rules
+
+If the model is **not transitioning**, the following rules apply:
 
 | Condition | Target Replicas | Rationale |
 |-----------|----------------|-----------|
@@ -196,14 +215,15 @@ Only runs when model-based optimizer provides per-variant targets. Applies hybri
 | No change (3) | Scale-down (2) | **Scale-down to 2** if safe | Model-based-driven: capacity approved |
 
 **Key Principles:**
-1. **Ready replicas only** (Step 1): Use replicas reporting metrics to avoid scaling up for not-yet-ready pods
-2. **Preserve desired replicas** (Step 1): When desired ≠ current, always use desired as capacity target
-3. **Cost-aware selection** (Step 1): Cheapest variant for scale-up, most expensive for scale-down
-4. **Deterministic tie-breaking** (Step 1): When variants have equal costs, alphabetically first for scale-up, last for scale-down
-5. **Pending replica awareness** (Step 1): Skip variants with pending replicas during scale-up to prevent cascade scaling
-6. **Capacity veto** (Step 2): Capacity needs override model-based scale-down suggestions
-7. **Safety block** (Step 2): Unsafe scale-down blocked regardless of model-based recommendation
-8. **Model-based priority** (Step 2): When capacity allows, follow model-based recommendations
+1. **Model-level transition protection** (Step 1): Block ALL scaling if ANY variant is transitioning
+2. **Ready replicas only** (Step 1): Use replicas reporting metrics to avoid scaling up for not-yet-ready pods
+3. **Preserve desired replicas** (Step 1): When desired ≠ current, always use desired as capacity target
+4. **Cost-aware selection** (Step 1): Cheapest variant for scale-up, most expensive for scale-down
+5. **Deterministic tie-breaking** (Step 1): When variants have equal costs, alphabetically first for scale-up, last for scale-down
+6. **Pending replica awareness** (Step 1): Skip variants with pending replicas during scale-up to prevent cascade scaling
+7. **Capacity veto** (Step 2): Capacity needs override model-based scale-down suggestions
+8. **Safety block** (Step 2): Unsafe scale-down blocked regardless of model-based recommendation
+9. **Model-based priority** (Step 2): When capacity allows, follow model-based recommendations
 
 ## Usage Examples
 
@@ -311,6 +331,88 @@ for _, decision := range decisions {
         // No action needed
     }
 }
+```
+
+### Example: Model-Level Transition Protection
+
+The analyzer blocks all scaling decisions when ANY variant is in a transition state:
+
+```go
+// Example: Model with 2 variants - one transitioning, one stable
+replicaMetrics := []interfaces.ReplicaMetrics{
+    // v1-expensive: has 2 replicas reporting metrics
+    {PodName: "v1-pod-1", VariantName: "v1-expensive", ModelID: "llama-8b",
+     AcceleratorName: "A100", Cost: 20, KvCacheUsage: 0.70, QueueLength: 2},
+    {PodName: "v1-pod-2", VariantName: "v1-expensive", ModelID: "llama-8b",
+     AcceleratorName: "A100", Cost: 20, KvCacheUsage: 0.75, QueueLength: 3},
+
+    // v2-cheap: has 2 replicas reporting metrics, low saturation
+    {PodName: "v2-pod-1", VariantName: "v2-cheap", ModelID: "llama-8b",
+     AcceleratorName: "L40S", Cost: 5, KvCacheUsage: 0.60, QueueLength: 1},
+    {PodName: "v2-pod-2", VariantName: "v2-cheap", ModelID: "llama-8b",
+     AcceleratorName: "L40S", Cost: 5, KvCacheUsage: 0.65, QueueLength: 2},
+}
+
+// Variant states show v1 is transitioning (desired != current)
+variantStates := []interfaces.VariantReplicaState{
+    {VariantName: "v1-expensive", CurrentReplicas: 2, DesiredReplicas: 4}, // Transitioning!
+    {VariantName: "v2-cheap", CurrentReplicas: 2, DesiredReplicas: 0},     // Stable
+}
+
+// Analyze saturation (shows scale-up is needed)
+analysis, _ := analyzer.AnalyzeModelSaturation(ctx, "llama-8b", "prod", replicaMetrics, config)
+// analysis.ShouldScaleUp = true
+
+// Calculate targets with transition protection
+targets := analyzer.CalculateSaturationTargets(ctx, analysis, variantStates)
+
+// Result:
+// map[v1-expensive:4 v2-cheap:2]
+//
+// v1-expensive: target=4 (preserves desired, transition in progress)
+// v2-cheap: target=2 (NO scale-up, blocked by model transition)
+//
+// Even though saturation analysis indicated scale-up is needed,
+// and v2-cheap is the cheapest variant, it is NOT scaled up because
+// v1-expensive is transitioning. The entire model is blocked from
+// making new scaling decisions until all variants reach steady state.
+
+// Log output:
+// INFO Model in transition, blocking scaling decisions
+//   modelID=llama-8b
+//   reasons=["v1-expensive: desired(4)!=current(2)"]
+```
+
+**Why this matters:**
+- Prevents oscillating scale decisions during cluster state changes
+- Ensures capacity calculations are based on complete, stable metrics
+- Avoids race conditions when multiple variants scale simultaneously
+- Maintains predictable autoscaling behavior during deployments
+
+**Transition scenarios that trigger blocking:**
+
+1. **Desired vs Current mismatch** (scale operation in progress):
+   ```
+   v1: desired=4, current=2, metrics=2  → Model transitioning
+   ```
+
+2. **Metrics vs Current mismatch** (pods starting up):
+   ```
+   v1: desired=0, current=3, metrics=2  → Model transitioning (1 pod not reporting yet)
+   ```
+
+3. **Multiple variants transitioning**:
+   ```
+   v1: desired=4, current=2, metrics=2  → Transitioning
+   v2: desired=0, current=3, metrics=2  → Transitioning
+   Result: All scaling blocked for the model
+   ```
+
+**Model becomes stable when:**
+```
+For ALL variants:
+  - (desired == 0 OR desired == current) AND
+  - (metrics count == current)
 ```
 
 ## Multi-Variant Analysis
@@ -457,6 +559,8 @@ go test -v
   - ✅ Scale-up cheapest variant
   - ✅ Scale-down most expensive variant
   - ✅ Preserve desired replicas (desired ≠ current)
+  - ✅ **Model-level transition blocking** (desired ≠ current)
+  - ✅ **Metrics mismatch transition blocking** (metrics ≠ current)
   - ✅ All variants preserved scenario
   - ✅ Equal costs with deterministic tie-breaking
   - ✅ Scale-down below minimum (prevents scaling to 0)
