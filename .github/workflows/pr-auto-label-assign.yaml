@@ -50,12 +50,12 @@ jobs:
 
             // Define reviewers for each area (excluding PR author)
             const areaReviewers = {
-              'area/api': ['asm582', 'WheelyMcBones'],
-              'area/controller': ['asm582', 'WheelyMcBones'],
+              'area/api': ['asm582', 'lionelvillard'],
+              'area/controller': ['asm582', 'lionelvillard'],
               'area/engine': ['lionelvillard', 'asm582'],
               'area/collector': ['lionelvillard', 'asm582'],
               'area/saturation': ['ev-shindin', 'asm582'],
-              'area/ci': ['clubanderson'],
+              'area/ci': ['clubanderson', 'asm582'],
               'area/e2e': ['clubanderson', 'asm582'],
               'area/charts': ['clubanderson', 'asm582'],
               'area/deploy': ['clubanderson', 'asm582'],
