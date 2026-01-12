@@ -37,7 +37,7 @@ area/ci:
 area/e2e:
   - changed-files:
       - any-glob-to-any-file:
-          - 'test/e2e**'
+          - 'test/e2e/**'
           - 'test/e2e-openshift/**'
           - 'test/e2e-saturation-based/**'
 
