@@ -1,14 +1,269 @@
 package limiter
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
+	llmdVariantAutoscalingV1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/config"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/core"
 )
+
+func TestNewTargetLimiter(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *TargetLimiterConfiguration
+		want    *TargetLimiter
+		wantErr bool
+	}{
+		{
+			name: "Test case 1: Valid configuration",
+			config: &TargetLimiterConfiguration{
+				SaturationPolicy: "PriorityRoundRobin",
+				ServiceClassName: "Default",
+			},
+			want: &TargetLimiter{
+				&TargetLimiterConfiguration{
+					SaturationPolicy: "PriorityRoundRobin",
+					ServiceClassName: "Default",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "Test case 2: Nil configuration",
+			config: nil,
+			want: &TargetLimiter{
+				&TargetLimiterConfiguration{
+					SaturationPolicy: "PriorityRoundRobin",
+					ServiceClassName: "Default",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Test case 3: Empty saturation policy",
+			config: &TargetLimiterConfiguration{
+				SaturationPolicy: "",
+				ServiceClassName: "Default",
+			},
+			want: &TargetLimiter{
+				&TargetLimiterConfiguration{
+					SaturationPolicy: "PriorityRoundRobin",
+					ServiceClassName: "Default",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Test case 4: Empty service class name",
+			config: &TargetLimiterConfiguration{
+				SaturationPolicy: "PriorityRoundRobin",
+				ServiceClassName: "",
+			},
+			want: &TargetLimiter{
+				&TargetLimiterConfiguration{
+					SaturationPolicy: "PriorityRoundRobin",
+					ServiceClassName: "Default",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Test case 5: Other saturation policy",
+			config: &TargetLimiterConfiguration{
+				SaturationPolicy: "Random",
+				ServiceClassName: "Free",
+			},
+			want: &TargetLimiter{
+				&TargetLimiterConfiguration{
+					SaturationPolicy: "Random",
+					ServiceClassName: "Free",
+				},
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, gotErr := NewTargetLimiter(tt.config)
+			if gotErr != nil {
+				if !tt.wantErr {
+					t.Errorf("NewTargetLimiter() failed: %v", gotErr)
+				}
+				return
+			}
+			if tt.wantErr {
+				t.Fatal("NewTargetLimiter() succeeded unexpectedly")
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("NewTargetLimiter() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTargetLimiter_Allocate(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    *TargetLimiterConfiguration
+		decisions []interfaces.VariantDecision
+		vaMap     map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling
+		inventory map[string]map[string]collector.AcceleratorModelInfo
+		wantErr   bool
+	}{
+		{
+			name:   "Test case 1: Basic input",
+			config: &TargetLimiterConfiguration{},
+			decisions: []interfaces.VariantDecision{
+				{
+					VariantName:     "variant-1",
+					ModelID:         "model-1",
+					AcceleratorName: "nvidia-tesla-k80",
+					CurrentReplicas: 2,
+					TargetReplicas:  6,
+					Cost:            90,
+					GPUsPerReplica:  1,
+				},
+			},
+			vaMap: map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
+				"variant-1": {
+					Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
+						ModelID: "model-1",
+					},
+					Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
+						DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
+							Accelerator: "nvidia-tesla-k80",
+							NumReplicas: 2,
+						},
+					},
+				},
+			},
+			inventory: map[string]map[string]collector.AcceleratorModelInfo{
+				"node-1": {
+					"nvidia-tesla-k80": {Count: 4},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "Test case 2: Multiple variants",
+			config: &TargetLimiterConfiguration{},
+			decisions: []interfaces.VariantDecision{
+				{
+					VariantName:     "variant-1",
+					ModelID:         "model-1",
+					AcceleratorName: "nvidia-tesla-k80",
+					CurrentReplicas: 2,
+					TargetReplicas:  6,
+					Cost:            90,
+					GPUsPerReplica:  1,
+				},
+				{
+					VariantName:     "variant-2",
+					ModelID:         "model-2",
+					AcceleratorName: "nvidia-tesla-k80",
+					CurrentReplicas: 1,
+					TargetReplicas:  4,
+					Cost:            60,
+					GPUsPerReplica:  1,
+				},
+			},
+			vaMap: map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
+				"variant-1": {
+					Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
+						ModelID: "model-1",
+					},
+					Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
+						DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
+							Accelerator: "nvidia-tesla-k80",
+							NumReplicas: 2,
+						},
+					},
+				},
+				"variant-2": {
+					Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
+						ModelID: "model-2",
+					},
+					Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
+						DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
+							Accelerator: "nvidia-tesla-k80",
+							NumReplicas: 1,
+						},
+					},
+				},
+			},
+			inventory: map[string]map[string]collector.AcceleratorModelInfo{
+				"node-1": {
+					"nvidia-tesla-k80": {Count: 7},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "Test case 3: Zero inventory",
+			config: &TargetLimiterConfiguration{},
+			decisions: []interfaces.VariantDecision{
+				{
+					VariantName:     "variant-1",
+					ModelID:         "model-1",
+					AcceleratorName: "nvidia-tesla-k80",
+					CurrentReplicas: 2,
+					TargetReplicas:  6,
+					Cost:            90,
+					GPUsPerReplica:  1,
+				},
+			},
+			vaMap: map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
+				"variant-1": {
+					Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
+						ModelID: "model-1",
+					},
+					Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
+						DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
+							Accelerator: "nvidia-tesla-k80",
+							NumReplicas: 2,
+						},
+					},
+				},
+			},
+			inventory: map[string]map[string]collector.AcceleratorModelInfo{
+				"node-1": {
+					"amd": {Count: 3},
+				},
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l, err := NewTargetLimiter(tt.config)
+			if err != nil {
+				t.Fatalf("could not construct receiver type: %v", err)
+			}
+			gotErr := l.Allocate(context.Background(), tt.decisions, tt.vaMap, tt.inventory)
+			if gotErr != nil {
+				if !tt.wantErr {
+					t.Errorf("Allocate() failed: %v", gotErr)
+				}
+				return
+			}
+			if tt.wantErr {
+				t.Fatal("Allocate() succeeded unexpectedly")
+			}
+			allocated := GetAllocatedMap(tt.decisions)
+			available := GetAvailableMap(tt.inventory)
+			for acc, count := range allocated {
+				if count > available[acc] {
+					t.Errorf("Allocate() allocated %d of %s, but only %d available", count, acc, available[acc])
+				}
+			}
+		})
+	}
+}
 
 func Test_createCapacityData(t *testing.T) {
 	tests := []struct {
@@ -689,4 +944,26 @@ func EqualSlicesUnorderedAny[T any](s1, s2 []T) bool {
 
 	// Since lengths were equal and all elements are found.
 	return true
+}
+
+// GetAllocatedMap creates a map of accelerator name to total allocated replicas from the decisions.
+func GetAllocatedMap(decisions []interfaces.VariantDecision) map[string]int {
+	allocated := make(map[string]int)
+	for _, d := range decisions {
+		existing := allocated[d.AcceleratorName]
+		allocated[d.AcceleratorName] = existing + d.TargetReplicas
+	}
+	return allocated
+}
+
+// GetAvailableMap creates a map of accelerator name to total available count from the inventory.
+func GetAvailableMap(inventory map[string]map[string]collector.AcceleratorModelInfo) map[string]int {
+	available := make(map[string]int)
+	for _, accMap := range inventory {
+		for acc, info := range accMap {
+			existing := available[acc]
+			available[acc] = existing + info.Count
+		}
+	}
+	return available
 }

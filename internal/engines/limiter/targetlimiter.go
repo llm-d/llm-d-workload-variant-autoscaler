@@ -58,14 +58,14 @@ func NewTargetLimiter(config *TargetLimiterConfiguration) (*TargetLimiter, error
 // Allocate allocates limited GPU capacity among variants by updating their respective decisions
 func (l *TargetLimiter) Allocate(
 	ctx context.Context,
-	decisions *[]interfaces.VariantDecision,
+	decisions []interfaces.VariantDecision,
 	vaMap map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling,
 	inventory map[string]map[string]collector.AcceleratorModelInfo,
 ) error {
 	logger := ctrl.LoggerFrom(ctx)
 
 	// Prepare system data for the optimizer
-	system, err := prepareSystemData(inventory, *decisions)
+	system, err := prepareSystemData(inventory, decisions)
 	if err != nil {
 		return err
 	}
@@ -87,23 +87,25 @@ func (l *TargetLimiter) Allocate(
 
 	// Update decisions based on optimized allocations
 	decisionMap := make(map[string]*interfaces.VariantDecision)
-	for _, d := range *decisions {
-		decisionMap[d.VariantName] = &d
+	for i, d := range decisions {
+		decisionMap[d.VariantName] = &decisions[i]
 	}
 	for name, server := range system.Servers() {
-		alloc := server.CurAllocation()
-		if alloc == nil {
-			logger.Info("No allocation found for variant", "variant", name)
-			continue
+		var targetReplicas int
+		var cost float64
+		if alloc := server.Allocation(); alloc != nil {
+			targetReplicas = alloc.NumReplicas()
+			cost = float64(alloc.Cost())
 		}
 		decision, exists := decisionMap[name]
 		if !exists {
 			logger.Info("No decision found for variant", "variant", name)
 			continue
 		}
+		logger.Info("Limited allocation for variant", "variant", name, "targetReplicas", targetReplicas, "cost", cost)
 		// TODO: For now, we are overwriting the TargetReplicas and Cost based on the optimizer's output.
-		decision.TargetReplicas = alloc.NumReplicas()
-		decision.Cost = float64(alloc.Cost())
+		(*decision).TargetReplicas = targetReplicas
+		(*decision).Cost = cost
 	}
 
 	logger.Info("Limited capacity allocation completed successfully")

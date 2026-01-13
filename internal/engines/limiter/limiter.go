@@ -14,7 +14,7 @@ type Limiter interface {
 	// Allocate allocates limited GPU resources among variants by updating their respective decisions
 	Allocate(
 		ctx context.Context,
-		decisions *[]interfaces.VariantDecision,
+		decisions []interfaces.VariantDecision,
 		vaMap map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling,
 		inventory map[string]map[string]collector.AcceleratorModelInfo,
 	) error

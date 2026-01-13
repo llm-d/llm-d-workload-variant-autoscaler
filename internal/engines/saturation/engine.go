@@ -223,7 +223,7 @@ func (e *Engine) optimize(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err = limiter.Allocate(ctx, &allDecisions, vaMap, inventory); err != nil {
+		if err = limiter.Allocate(ctx, allDecisions, vaMap, inventory); err != nil {
 			return err
 		}
 	}
