@@ -12,6 +12,7 @@ Getting started and using WVA:
 - **[Configuration](user-guide/configuration.md)** - Configuring WVA for your workloads
 - **[CRD Reference](user-guide/crd-reference.md)** - Complete API reference for VariantAutoscaling
 - **[Multi-Controller Isolation](user-guide/multi-controller-isolation.md)** - Running multiple WVA controller instances
+- **[Scale-to-Zero Guide](user-guide/scale-to-zero.md)** - Configuring automatic scale-to-zero for idle models
 
 ### Tutorials
 

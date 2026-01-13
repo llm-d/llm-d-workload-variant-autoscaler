@@ -163,6 +163,37 @@ env:
 
 See [Saturation Analyzer Documentation](../../docs/saturation-analyzer.md) for configuration details.
 
+### Scale-to-Zero Mode
+
+**Enable complete resource optimization by scaling to zero replicas when idle.**
+
+WVA can automatically scale deployments to zero replicas after a configurable period of inactivity:
+
+- **Behavior**: Monitors request patterns and scales to zero when no traffic detected
+- **How It Works**: Tracks successful requests via Prometheus, waits for retention period, then scales to zero
+- **Configuration**: Global enable via Helm values, per-model overrides via ConfigMap
+- **Prerequisites**: Requires HPA's `HPAScaleToZero` feature gate (K8s 1.31+ alpha) or KEDA
+- **Pros**: Maximum cost savings, efficient resource utilization
+- **Cons**: Cold-start latency (2-8 minutes) when scaling from zero
+
+**Enable:**
+```yaml
+# values.yaml
+wva:
+  scaleToZero: true  # Enable globally (default: false)
+```
+
+**Per-Model Configuration:**
+```yaml
+# ConfigMap: model-scale-to-zero-config
+data:
+  default: |
+    enable_scale_to_zero: true
+    retention_period: "15m"  # Wait 15 minutes after last request
+```
+
+For complete configuration options and examples, see the [Scale-to-Zero Guide](scale-to-zero.md).
+
 ## ConfigMaps
 
 WVA uses two ConfigMaps for cluster-wide configuration.
@@ -192,6 +223,28 @@ data:
       cost: 80
       memSize: 81920
 ```
+
+### Scale-to-Zero ConfigMap
+
+Defines per-model scale-to-zero behavior:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-scale-to-zero-config
+  namespace: workload-variant-autoscaler-system
+data:
+  default: |
+    enable_scale_to_zero: true
+    retention_period: "15m"
+  
+  llama-8b: |
+    model_id: meta/llama-3.1-8b
+    retention_period: "5m"
+```
+
+See [Scale-to-Zero Guide](scale-to-zero.md) for complete documentation.
 
 ### Service Class ConfigMap
 

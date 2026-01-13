@@ -205,7 +205,11 @@ kubectl logs -n workload-variant-autoscaler-system deploy/workload-variant-autos
 
 ## Feature: Scale to Zero
 
-The WVA can leverage on HPA's *alpha* feature for scale to zero functionality, enabling complete resource optimization by scaling deployments down to zero replicas when no load is detected.
+WVA can leverage HPA's *alpha* `HPAScaleToZero` feature for scale-to-zero functionality, enabling complete resource optimization by scaling deployments down to zero replicas when no traffic is detected.
+
+**For comprehensive scale-to-zero documentation, see the [Scale-to-Zero Configuration Guide](../user-guide/scale-to-zero.md).**
+
+### Quick Setup
 
 To enable `HPAScaleToZero`, you need to enable the corresponding feature flags in the Kind cluster configuration:
 
@@ -439,7 +443,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: vllme-deployment
-  minReplicas: 0  # HPAScaleToZero - alpha feature
+  minReplicas: 0  # HPAScaleToZero - alpha feature (requires K8s 1.31+ with feature gate enabled)
   maxReplicas: 10
   behavior:
     scaleUp:

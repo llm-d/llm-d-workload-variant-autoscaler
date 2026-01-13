@@ -16,7 +16,7 @@ After deploying the Workload-Variant-Autoscaler following the provided guides, t
 
 - Reads the values for the `inferno_desired_replicas` metrics and adjusts Deployment replicas accordingly, using an `AverageValue` target.
 
-- Natively supports scale to zero.
+- **Natively supports scale to zero** without requiring feature gates (unlike HPA). See the [Scale-to-Zero Configuration Guide](../user-guide/scale-to-zero.md) for details.
 
 ## Prerequisites
 
@@ -139,6 +139,8 @@ To query KEDA external metrics, you must use:
 
 ### 7. Scaling Events Monitoring
 
+Monitor scaling events to verify scale-to-zero functionality:
+
 ```bash
 # Watch all scaling events in the namespace
 kubectl get events -n llm-d-sim --field-selector type=Normal -w
@@ -151,6 +153,8 @@ kubectl get events -n llm-d-sim --field-selector type=Normal -w
 3m37s       Normal   KEDAScaleTargetActivated     scaledobject/vllme-deployment-scaler                      Scaled apps/v1.Deployment llm-d-sim/vllme-deployment from 0 to 1, triggered by inferno-desired-replicas
 3m37s       Normal   ScalingReplicaSet            deployment/vllme-deployment                               Scaled up replica set vllme-deployment-64f7cd79f5 from 0 to 1
 ```
+
+**Note:** The `KEDAScaleTargetDeactivated` event shows successful scale-to-zero. For detailed scale-to-zero configuration options, see the [Scale-to-Zero Guide](../user-guide/scale-to-zero.md).
 
 ```bash
 # Monitor deployment scaling events specifically  
