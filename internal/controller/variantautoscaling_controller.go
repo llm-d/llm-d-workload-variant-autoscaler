@@ -22,7 +22,6 @@ import (
 	"os"
 
 	promoperator "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	yaml "gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -40,7 +39,6 @@ import (
 	llmdVariantAutoscalingV1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/config"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/common"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/logging"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils"
 )
@@ -70,8 +68,8 @@ const (
 	defaultConfigMapName = "workload-variant-autoscaler-variantautoscaling-config"
 	// ServiceMonitor constants for watching controller's own metrics ServiceMonitor
 	defaultServiceMonitorName = "workload-variant-autoscaler-controller-manager-metrics-monitor"
-
-	defaultSaturationConfigMapName = "saturation-scaling-config"
+	// Unified model scaling ConfigMap name
+	defaultModelScalingConfigMapName = "model-scaling-config"
 )
 
 func getNamespace() string {
@@ -88,11 +86,11 @@ func getConfigMapName() string {
 	return defaultConfigMapName
 }
 
-func getSaturationConfigMapName() string {
-	if name := os.Getenv("SATURATION_CONFIG_MAP_NAME"); name != "" {
+func getModelScalingConfigMapName() string {
+	if name := os.Getenv("MODEL_SCALING_CONFIG_MAP_NAME"); name != "" {
 		return name
 	}
-	return defaultSaturationConfigMapName
+	return defaultModelScalingConfigMapName
 }
 
 var (
@@ -309,35 +307,11 @@ func (r *VariantAutoscalingReconciler) SetupWithManager(mgr ctrl.Manager) error 
 					// Global config update is handled by the Engine loop which reads the new configuration.
 					// No need to trigger immediate reconciliation for individual VAs.
 					return nil
-				} else if name == getSaturationConfigMapName() {
-					// Saturation Scaling Config
-					configs := make(map[string]interfaces.SaturationScalingConfig)
-					count := 0
-					for key, yamlStr := range cm.Data {
-						var satConfig interfaces.SaturationScalingConfig
-						if err := yaml.Unmarshal([]byte(yamlStr), &satConfig); err != nil {
-							logger.Error(err, "Failed to parse saturation scaling config entry", "key", key)
-							continue
-						}
-						// Validate
-						if err := satConfig.Validate(); err != nil {
-							logger.Error(err, "Invalid saturation scaling config entry", "key", key)
-							continue
-						}
-						configs[key] = satConfig
-						count++
-					}
-					common.Config.UpdateSaturationConfig(configs)
-					logger.Info("Updated global saturation config from ConfigMap", "entries", count)
-
-					// Global saturation config update is handled by the Engine loop.
-					// No need to trigger immediate reconciliation for individual VAs.
-					return nil
-				} else if name == config.DefaultScaleToZeroConfigMapName {
-					// Scale-to-Zero Config
-					scaleToZeroConfig := config.ParseScaleToZeroConfigMap(cm.Data)
-					common.Config.UpdateScaleToZeroConfig(scaleToZeroConfig)
-					logger.Info("Updated global scale-to-zero config from ConfigMap", "modelCount", len(scaleToZeroConfig))
+				} else if name == getModelScalingConfigMapName() {
+					// Unified Model Scaling Config (saturation + scale-to-zero)
+					modelScalingConfig := config.ParseModelScalingConfigMap(cm.Data)
+					common.Config.UpdateModelScalingConfig(modelScalingConfig)
+					logger.Info("Updated unified model scaling config from ConfigMap", "modelCount", len(modelScalingConfig))
 
 					// Global config update is handled by the Engine loop.
 					// No need to trigger immediate reconciliation for individual VAs.

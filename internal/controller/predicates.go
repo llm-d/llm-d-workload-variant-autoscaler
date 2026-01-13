@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/config"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/constants"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -15,7 +14,7 @@ import (
 func ConfigMapPredicate() predicate.Predicate {
 	return predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		name := obj.GetName()
-		return (name == getConfigMapName() || name == getSaturationConfigMapName() || name == config.DefaultScaleToZeroConfigMapName) && obj.GetNamespace() == configMapNamespace
+		return (name == getConfigMapName() || name == getModelScalingConfigMapName()) && obj.GetNamespace() == configMapNamespace
 	})
 }
 

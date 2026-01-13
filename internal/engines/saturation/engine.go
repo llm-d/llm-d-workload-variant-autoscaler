@@ -160,12 +160,14 @@ func (e *Engine) optimize(ctx context.Context) error {
 		logger.Info("Collected cluster accelerator inventory (Limited Mode)", "inventory", inventory)
 	}
 
-	saturationConfigMap := common.Config.GetSaturationConfig()
-	if len(saturationConfigMap) == 0 {
-		logger.Info("Saturation scaling config not loaded yet, skipping optimization")
+	// Get unified model scaling config
+	modelScalingConfig := common.Config.GetModelScalingConfig()
+	if !modelScalingConfig.HasSaturationConfig() {
+		logger.Info("Model scaling config not loaded yet, skipping optimization")
 		return nil
 	}
 
+	saturationConfigMap := modelScalingConfig.ToSaturationConfig()
 	saturationConfig, ok := saturationConfigMap["default"]
 	if !ok {
 		logger.Info("Default saturation scaling config not found, skipping optimization")
@@ -218,7 +220,7 @@ func (e *Engine) optimize(ctx context.Context) error {
 		if saturationAnalysis != nil {
 			// Apply scale-to-zero enforcement after saturation analysis
 			// This either scales to zero if enabled and no requests, or ensures minimum replicas
-			scaleToZeroConfig := common.Config.GetScaleToZeroConfig()
+			scaleToZeroConfig := common.Config.GetModelScalingConfig().ToScaleToZeroConfig()
 
 			// Copy original targets for logging (enforcer modifies map in place)
 			originalTargets := make(map[string]int, len(saturationTargets))

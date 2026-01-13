@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/config"
-	interfaces "github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
@@ -57,8 +57,7 @@ func DecisionToOptimizedAlloc(d interfaces.VariantDecision) (int, string, metav1
 type GlobalConfig struct {
 	sync.RWMutex
 	OptimizationInterval string
-	SaturationConfig     map[string]interfaces.SaturationScalingConfig
-	ScaleToZeroConfig    config.ScaleToZeroConfigData
+	ModelScalingConfig   config.ModelScalingConfigData // Unified model scaling config
 }
 
 // UpdateOptimizationConfig updates the optimization interval.
@@ -68,13 +67,6 @@ func (c *GlobalConfig) UpdateOptimizationConfig(interval string) {
 	c.OptimizationInterval = interval
 }
 
-// UpdateSaturationConfig updates the saturation scaling configuration.
-func (c *GlobalConfig) UpdateSaturationConfig(config map[string]interfaces.SaturationScalingConfig) {
-	c.Lock()
-	defer c.Unlock()
-	c.SaturationConfig = config
-}
-
 // GetOptimizationInterval returns the current optimization interval.
 func (c *GlobalConfig) GetOptimizationInterval() string {
 	c.RLock()
@@ -82,31 +74,21 @@ func (c *GlobalConfig) GetOptimizationInterval() string {
 	return c.OptimizationInterval
 }
 
-// GetSaturationConfig returns the current saturation scaling configuration.
-func (c *GlobalConfig) GetSaturationConfig() map[string]interfaces.SaturationScalingConfig {
-	c.RLock()
-	defer c.RUnlock()
-	// Return a copy or just the map (caller should not modify it)
-	// For efficiency, expecting caller to treat as read-only or we copy if needed.
-	// Returning map directly for now as readers are expected to be well-behaved.
-	return c.SaturationConfig
-}
-
-// UpdateScaleToZeroConfig updates the scale-to-zero configuration.
-func (c *GlobalConfig) UpdateScaleToZeroConfig(configData config.ScaleToZeroConfigData) {
+// UpdateModelScalingConfig updates the unified model scaling configuration.
+func (c *GlobalConfig) UpdateModelScalingConfig(configData config.ModelScalingConfigData) {
 	c.Lock()
 	defer c.Unlock()
-	c.ScaleToZeroConfig = configData
+	c.ModelScalingConfig = configData
 }
 
-// GetScaleToZeroConfig returns the current scale-to-zero configuration.
-func (c *GlobalConfig) GetScaleToZeroConfig() config.ScaleToZeroConfigData {
+// GetModelScalingConfig returns the current unified model scaling configuration.
+func (c *GlobalConfig) GetModelScalingConfig() config.ModelScalingConfigData {
 	c.RLock()
 	defer c.RUnlock()
-	if c.ScaleToZeroConfig == nil {
-		return make(config.ScaleToZeroConfigData)
+	if c.ModelScalingConfig == nil {
+		return make(config.ModelScalingConfigData)
 	}
-	return c.ScaleToZeroConfig
+	return c.ModelScalingConfig
 }
 
 // TransformationConfig is the global singleton for configuration.
