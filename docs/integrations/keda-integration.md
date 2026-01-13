@@ -16,7 +16,14 @@ After deploying the Workload-Variant-Autoscaler following the provided guides, t
 
 - Reads the values for the `inferno_desired_replicas` metrics and adjusts Deployment replicas accordingly, using an `AverageValue` target.
 
-- Natively supports scale to zero.
+KEDA provides powerful autoscaling capabilities with several advantages over HPA:
+
+- Native Kubernetes CRD-based scaling
+- Event-driven architecture with multiple scalers (Prometheus, Kafka, RabbitMQ, etc.)
+- Natively supports scale to zero (no alpha feature gates required)
+- More flexible scaling policies
+
+For comprehensive scale-to-zero configuration, see the [Scale-to-Zero Configuration Guide](../user-guide/scale-to-zero.md).
 
 ## Prerequisites
 

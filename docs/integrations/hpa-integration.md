@@ -205,7 +205,11 @@ kubectl logs -n workload-variant-autoscaler-system deploy/workload-variant-autos
 
 ## Feature: Scale to Zero
 
-The WVA can leverage on HPA's *alpha* feature for scale to zero functionality, enabling complete resource optimization by scaling deployments down to zero replicas when no load is detected.
+> **For Complete Documentation:** See the [Scale-to-Zero Configuration Guide](../user-guide/scale-to-zero.md) for comprehensive setup instructions, per-model configuration, operational considerations, and troubleshooting.
+
+The WVA can leverage HPA's *alpha* feature for scale-to-zero functionality, enabling complete resource optimization by scaling deployments down to zero replicas when no load is detected.
+
+### Quick Setup
 
 To enable `HPAScaleToZero`, you need to enable the corresponding feature flags in the Kind cluster configuration:
 
@@ -263,11 +267,15 @@ kubectl -n kube-system get pod -l component=kube-controller-manager -o yaml | gr
       - --authentication-kubeconfig=/etc/kubernetes/controller-manager.conf
 ```
 
-7. Specify the `minReplicas: 0` field in the `yaml` snippet for HPA and apply it following the integration steps
+7. Specify the `minReplicas: 0` field in the yaml snippet for HPA and apply it following the integration steps
+
+8. Configure WVA scale-to-zero settings - see [Scale-to-Zero Guide](../user-guide/scale-to-zero.md) for details
 
 ### Note on possible timing issues
 
 For this discussion, please refer to the [community doc](https://docs.google.com/document/d/15z1u2HIH7qoxT-nxj4BnZ_TyqHPqIn0FcCPTnIMn7bs/edit?tab=t.0).
+
+For operational considerations, monitoring, and troubleshooting, see the [Scale-to-Zero Configuration Guide](../user-guide/scale-to-zero.md).
 
 ## Configuration Files
 

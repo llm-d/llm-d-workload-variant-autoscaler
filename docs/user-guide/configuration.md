@@ -279,6 +279,36 @@ spec:
 - If costs are equal, chooses variant with most available capacity
 - Does not affect model-based optimization (uses accelerator unit costs)
 
+### Scale-to-Zero Configuration
+
+WVA supports scaling deployments to zero replicas when there is no traffic, enabling complete resource optimization.
+
+For complete scale-to-zero configuration, see the [Scale-to-Zero Guide](scale-to-zero.md).
+
+**Quick Example:**
+
+```yaml
+# Enable scale-to-zero via Helm
+wva:
+  scaleToZero: true
+```
+
+Or configure per-model with ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-scale-to-zero-config
+  namespace: workload-variant-autoscaler-system
+data:
+  default: |
+    enable_scale_to_zero: true
+    retention_period: "15m"
+```
+
+See [Scale-to-Zero Guide](scale-to-zero.md) for detailed configuration options, integration with HPA/KEDA, and operational considerations.
+
 ### Advanced Options
 
 See [CRD Reference](crd-reference.md) for advanced configuration options.
