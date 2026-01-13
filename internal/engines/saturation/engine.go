@@ -219,8 +219,11 @@ func (e *Engine) optimize(ctx context.Context) error {
 
 	// apply limited mode saturation decisions
 	if strings.EqualFold(os.Getenv("WVA_LIMITED_MODE"), "true") {
-		limiterCapacityAllocator := limiter.NewLimitedCapacityAllocator(nil)
-		if err = limiterCapacityAllocator.Allocate(ctx, &allDecisions, vaMap, inventory); err != nil {
+		limiter, err := limiter.NewLimiter(limiter.TargetStrategy)
+		if err != nil {
+			return err
+		}
+		if err = limiter.Allocate(ctx, &allDecisions, vaMap, inventory); err != nil {
 			return err
 		}
 	}

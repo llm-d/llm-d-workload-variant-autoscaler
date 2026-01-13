@@ -316,7 +316,7 @@ func Test_createServiceClassData(t *testing.T) {
 			want: &config.ServiceClassData{
 				Spec: []config.ServiceClassSpec{
 					{
-						Name:     DefaultServiceClassName,
+						Name:     DefaultTargetLimiterServiceClassName,
 						Priority: 1,
 						ModelTargets: []config.ModelTarget{
 							{Model: "model-1"},
@@ -331,7 +331,7 @@ func Test_createServiceClassData(t *testing.T) {
 			want: &config.ServiceClassData{
 				Spec: []config.ServiceClassSpec{
 					{
-						Name:     DefaultServiceClassName,
+						Name:     DefaultTargetLimiterServiceClassName,
 						Priority: 1,
 						ModelTargets: []config.ModelTarget{
 							{Model: "model-1"},
@@ -347,7 +347,7 @@ func Test_createServiceClassData(t *testing.T) {
 			want: &config.ServiceClassData{
 				Spec: []config.ServiceClassSpec{
 					{
-						Name:         DefaultServiceClassName,
+						Name:         DefaultTargetLimiterServiceClassName,
 						Priority:     1,
 						ModelTargets: []config.ModelTarget{},
 					},
@@ -386,7 +386,7 @@ func Test_createServerData(t *testing.T) {
 					{
 						Name:            "variant-1",
 						Model:           "model-1",
-						Class:           DefaultServiceClassName,
+						Class:           DefaultTargetLimiterServiceClassName,
 						KeepAccelerator: true,
 						CurrentAlloc: config.AllocationData{
 							Accelerator: "nvidia-tesla-k80",
@@ -417,7 +417,7 @@ func Test_createServerData(t *testing.T) {
 					{
 						Name:            "variant-1",
 						Model:           "model-1",
-						Class:           DefaultServiceClassName,
+						Class:           DefaultTargetLimiterServiceClassName,
 						KeepAccelerator: true,
 						CurrentAlloc: config.AllocationData{
 							Accelerator: "nvidia-tesla-k80",
@@ -427,7 +427,7 @@ func Test_createServerData(t *testing.T) {
 					{
 						Name:            "variant-2",
 						Model:           "model-2",
-						Class:           DefaultServiceClassName,
+						Class:           DefaultTargetLimiterServiceClassName,
 						KeepAccelerator: true,
 						CurrentAlloc: config.AllocationData{
 							Accelerator: "nvidia-tesla-v100",
@@ -465,7 +465,7 @@ func Test_createServerData(t *testing.T) {
 					{
 						Name:            "variant-1",
 						Model:           "model-1",
-						Class:           DefaultServiceClassName,
+						Class:           DefaultTargetLimiterServiceClassName,
 						KeepAccelerator: true,
 						CurrentAlloc: config.AllocationData{
 							Accelerator: "nvidia-tesla-k80",
@@ -475,7 +475,7 @@ func Test_createServerData(t *testing.T) {
 					{
 						Name:            "variant-2",
 						Model:           "model-2",
-						Class:           DefaultServiceClassName,
+						Class:           DefaultTargetLimiterServiceClassName,
 						KeepAccelerator: true,
 						CurrentAlloc: config.AllocationData{
 							Accelerator: "nvidia-tesla-k80",
