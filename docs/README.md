@@ -12,6 +12,7 @@ Getting started and using WVA:
 - **[Configuration](user-guide/configuration.md)** - Configuring WVA for your workloads
 - **[CRD Reference](user-guide/crd-reference.md)** - Complete API reference for VariantAutoscaling
 - **[Multi-Controller Isolation](user-guide/multi-controller-isolation.md)** - Running multiple WVA controller instances
+- **[FAQ](user-guide/faq.md)** - Frequently Asked Questions
 
 ### Tutorials
 
@@ -64,7 +65,7 @@ Contributing to WVA:
 
 ## Need Help?
 
-- Check the [FAQ](user-guide/faq.md) (coming soon)
+- Check the [FAQ](user-guide/faq.md)
 - Open a [GitHub Issue](https://github.com/llm-d-incubation/workload-variant-autoscaler/issues)
 - Join community meetings
 
