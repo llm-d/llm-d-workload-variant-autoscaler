@@ -2,18 +2,26 @@ package limiter
 
 import (
 	"context"
+	"fmt"
 
-	llmdVariantAutoscalingV1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
 )
 
-// SaturationLimiter is a struct that implements the Limiter interface using a saturation strategy
+// SaturationLimiter implements the Limiter interface using a saturation strategy
 type SaturationLimiter struct {
 }
 
+// SaturationLimiterConfig holds the configuration for the SaturationLimiter
+type SaturationLimiterConfig struct {
+	LimiterConfig
+}
+
 // Allocate allocates limited GPU resources among variants by updating their respective decisions based on a saturation strategy
-func NewSaturationLimiter() (*SaturationLimiter, error) {
+func NewSaturationLimiter(config *SaturationLimiterConfig) (*SaturationLimiter, error) {
+	if config == nil {
+		return nil, fmt.Errorf("saturation limiter config cannot be nil")
+	}
 	return &SaturationLimiter{}, nil
 }
 
@@ -24,7 +32,6 @@ func NewSaturationLimiter() (*SaturationLimiter, error) {
 func (l *SaturationLimiter) Allocate(
 	ctx context.Context,
 	decisions []interfaces.VariantDecision,
-	vaMap map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling,
 	inventory map[string]map[string]collector.AcceleratorModelInfo,
 ) error {
 	return nil

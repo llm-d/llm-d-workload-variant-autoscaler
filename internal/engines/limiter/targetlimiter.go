@@ -2,8 +2,8 @@ package limiter
 
 import (
 	"context"
+	"fmt"
 
-	llmdVariantAutoscalingV1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/config"
@@ -20,8 +20,9 @@ const (
 	DefaultTargetLimiterServiceClassName = "Default"
 )
 
-// TargetLimiterConfiguration holds configuration for the TargetLimiter
-type TargetLimiterConfiguration struct {
+// TargetLimiterConfig holds configuration for the TargetLimiter
+type TargetLimiterConfig struct {
+	LimiterConfig
 	SaturationPolicy string
 	ServiceClassName string
 }
@@ -29,7 +30,7 @@ type TargetLimiterConfiguration struct {
 // TargetLimiter distributes the available limited amount of GPUs among variants,
 // given their recommended amounts by the engine(s)
 type TargetLimiter struct {
-	config *TargetLimiterConfiguration
+	config *TargetLimiterConfig
 }
 
 // TODO: Current implementation capitalizes on the optimizer (pkg/solver/optimizer) and its related data.
@@ -37,12 +38,9 @@ type TargetLimiter struct {
 // allocation logic directly using workload variants.
 
 // NewTargetLimiter creates a new TargetLimiter instance.
-func NewTargetLimiter(config *TargetLimiterConfiguration) (*TargetLimiter, error) {
+func NewTargetLimiter(config *TargetLimiterConfig) (*TargetLimiter, error) {
 	if config == nil {
-		config = &TargetLimiterConfiguration{
-			SaturationPolicy: DefaultTargetLimiterSaturationPolicy,
-			ServiceClassName: DefaultTargetLimiterServiceClassName,
-		}
+		return nil, fmt.Errorf("config cannot be nil")
 	}
 	if config.SaturationPolicy == "" {
 		config.SaturationPolicy = DefaultTargetLimiterSaturationPolicy
@@ -59,7 +57,6 @@ func NewTargetLimiter(config *TargetLimiterConfiguration) (*TargetLimiter, error
 func (l *TargetLimiter) Allocate(
 	ctx context.Context,
 	decisions []interfaces.VariantDecision,
-	vaMap map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling,
 	inventory map[string]map[string]collector.AcceleratorModelInfo,
 ) error {
 	logger := ctrl.LoggerFrom(ctx)

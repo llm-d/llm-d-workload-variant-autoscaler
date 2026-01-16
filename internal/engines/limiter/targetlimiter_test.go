@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	llmdVariantAutoscalingV1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/config"
@@ -15,18 +14,19 @@ import (
 func TestNewTargetLimiter(t *testing.T) {
 	tests := []struct {
 		name    string
-		config  *TargetLimiterConfiguration
+		config  *TargetLimiterConfig
 		want    *TargetLimiter
 		wantErr bool
 	}{
 		{
 			name: "Test case 1: Valid configuration",
-			config: &TargetLimiterConfiguration{
+			config: &TargetLimiterConfig{
+				LimiterConfig:    LimiterConfig{},
 				SaturationPolicy: "PriorityRoundRobin",
 				ServiceClassName: "Default",
 			},
 			want: &TargetLimiter{
-				&TargetLimiterConfiguration{
+				&TargetLimiterConfig{
 					SaturationPolicy: "PriorityRoundRobin",
 					ServiceClassName: "Default",
 				},
@@ -34,24 +34,20 @@ func TestNewTargetLimiter(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:   "Test case 2: Nil configuration",
-			config: nil,
-			want: &TargetLimiter{
-				&TargetLimiterConfiguration{
-					SaturationPolicy: "PriorityRoundRobin",
-					ServiceClassName: "Default",
-				},
-			},
-			wantErr: false,
+			name:    "Test case 2: Nil configuration",
+			config:  nil,
+			want:    nil,
+			wantErr: true,
 		},
 		{
 			name: "Test case 3: Empty saturation policy",
-			config: &TargetLimiterConfiguration{
+			config: &TargetLimiterConfig{
 				SaturationPolicy: "",
 				ServiceClassName: "Default",
 			},
 			want: &TargetLimiter{
-				&TargetLimiterConfiguration{
+				&TargetLimiterConfig{
+					LimiterConfig:    LimiterConfig{},
 					SaturationPolicy: "PriorityRoundRobin",
 					ServiceClassName: "Default",
 				},
@@ -60,12 +56,13 @@ func TestNewTargetLimiter(t *testing.T) {
 		},
 		{
 			name: "Test case 4: Empty service class name",
-			config: &TargetLimiterConfiguration{
+			config: &TargetLimiterConfig{
+				LimiterConfig:    LimiterConfig{},
 				SaturationPolicy: "PriorityRoundRobin",
 				ServiceClassName: "",
 			},
 			want: &TargetLimiter{
-				&TargetLimiterConfiguration{
+				&TargetLimiterConfig{
 					SaturationPolicy: "PriorityRoundRobin",
 					ServiceClassName: "Default",
 				},
@@ -74,12 +71,14 @@ func TestNewTargetLimiter(t *testing.T) {
 		},
 		{
 			name: "Test case 5: Other saturation policy",
-			config: &TargetLimiterConfiguration{
+			config: &TargetLimiterConfig{
+				LimiterConfig:    LimiterConfig{},
 				SaturationPolicy: "Random",
 				ServiceClassName: "Free",
 			},
 			want: &TargetLimiter{
-				&TargetLimiterConfiguration{
+				&TargetLimiterConfig{
+					LimiterConfig:    LimiterConfig{},
 					SaturationPolicy: "Random",
 					ServiceClassName: "Free",
 				},
@@ -109,15 +108,14 @@ func TestNewTargetLimiter(t *testing.T) {
 func TestTargetLimiter_Allocate(t *testing.T) {
 	tests := []struct {
 		name      string
-		config    *TargetLimiterConfiguration
+		config    *TargetLimiterConfig
 		decisions []interfaces.VariantDecision
-		vaMap     map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling
 		inventory map[string]map[string]collector.AcceleratorModelInfo
 		wantErr   bool
 	}{
 		{
 			name:   "Test case 1: Basic input",
-			config: &TargetLimiterConfiguration{},
+			config: &TargetLimiterConfig{},
 			decisions: []interfaces.VariantDecision{
 				{
 					VariantName:     "variant-1",
@@ -129,19 +127,6 @@ func TestTargetLimiter_Allocate(t *testing.T) {
 					GPUsPerReplica:  1,
 				},
 			},
-			vaMap: map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
-				"variant-1": {
-					Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
-						ModelID: "model-1",
-					},
-					Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
-						DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
-							Accelerator: "nvidia-tesla-k80",
-							NumReplicas: 2,
-						},
-					},
-				},
-			},
 			inventory: map[string]map[string]collector.AcceleratorModelInfo{
 				"node-1": {
 					"nvidia-tesla-k80": {Count: 4},
@@ -151,7 +136,7 @@ func TestTargetLimiter_Allocate(t *testing.T) {
 		},
 		{
 			name:   "Test case 2: Multiple variants",
-			config: &TargetLimiterConfiguration{},
+			config: &TargetLimiterConfig{},
 			decisions: []interfaces.VariantDecision{
 				{
 					VariantName:     "variant-1",
@@ -172,30 +157,6 @@ func TestTargetLimiter_Allocate(t *testing.T) {
 					GPUsPerReplica:  1,
 				},
 			},
-			vaMap: map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
-				"variant-1": {
-					Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
-						ModelID: "model-1",
-					},
-					Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
-						DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
-							Accelerator: "nvidia-tesla-k80",
-							NumReplicas: 2,
-						},
-					},
-				},
-				"variant-2": {
-					Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
-						ModelID: "model-2",
-					},
-					Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
-						DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
-							Accelerator: "nvidia-tesla-k80",
-							NumReplicas: 1,
-						},
-					},
-				},
-			},
 			inventory: map[string]map[string]collector.AcceleratorModelInfo{
 				"node-1": {
 					"nvidia-tesla-k80": {Count: 7},
@@ -205,7 +166,7 @@ func TestTargetLimiter_Allocate(t *testing.T) {
 		},
 		{
 			name:   "Test case 3: Zero inventory",
-			config: &TargetLimiterConfiguration{},
+			config: &TargetLimiterConfig{},
 			decisions: []interfaces.VariantDecision{
 				{
 					VariantName:     "variant-1",
@@ -215,19 +176,6 @@ func TestTargetLimiter_Allocate(t *testing.T) {
 					TargetReplicas:  6,
 					Cost:            90,
 					GPUsPerReplica:  1,
-				},
-			},
-			vaMap: map[string]*llmdVariantAutoscalingV1alpha1.VariantAutoscaling{
-				"variant-1": {
-					Spec: llmdVariantAutoscalingV1alpha1.VariantAutoscalingSpec{
-						ModelID: "model-1",
-					},
-					Status: llmdVariantAutoscalingV1alpha1.VariantAutoscalingStatus{
-						DesiredOptimizedAlloc: llmdVariantAutoscalingV1alpha1.OptimizedAlloc{
-							Accelerator: "nvidia-tesla-k80",
-							NumReplicas: 2,
-						},
-					},
 				},
 			},
 			inventory: map[string]map[string]collector.AcceleratorModelInfo{
@@ -244,7 +192,7 @@ func TestTargetLimiter_Allocate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("could not construct receiver type: %v", err)
 			}
-			gotErr := l.Allocate(context.Background(), tt.decisions, tt.vaMap, tt.inventory)
+			gotErr := l.Allocate(context.Background(), tt.decisions, tt.inventory)
 			if gotErr != nil {
 				if !tt.wantErr {
 					t.Errorf("Allocate() failed: %v", gotErr)
