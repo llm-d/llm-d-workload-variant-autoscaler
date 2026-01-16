@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,13 +46,97 @@ var (
 	llmDNamespace       = getEnvString("LLMD_NAMESPACE", "llm-d-inference-scheduler")
 	// Secondary llm-d namespace for Model B (multi-model testing)
 	llmDNamespaceB = getEnvString("LLMD_NAMESPACE_B", "")
-	gatewayName    = getEnvString("GATEWAY_NAME", "infra-inference-scheduling-inference-gateway")
+	gatewayName    = getEnvString("GATEWAY_NAME", "") // Auto-derived from namespace if empty
 	modelID        = getEnvString("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
-	deployment     = getEnvString("DEPLOYMENT", "ms-inference-scheduling-llm-d-modelservice-decode")
+	deployment     = getEnvString("DEPLOYMENT", "") // Auto-derived from namespace if empty
 	requestRate    = getEnvInt("REQUEST_RATE", 20)
 	numPrompts     = getEnvInt("NUM_PROMPTS", 3000)
 	multiModelMode = llmDNamespaceB != ""
 )
+
+// discoverPathNameFromDeployments discovers the path name from existing deployments in the namespace.
+// It looks for deployments with pattern: ms-{path-name}-llm-d-modelservice-decode
+// and extracts the path name from the deployment name.
+// Returns empty string if discovery fails (k8sClient not available or no deployments found).
+func discoverPathNameFromDeployments(namespace string) string {
+	if k8sClient == nil {
+		return ""
+	}
+
+	ctx := context.Background()
+	// List all deployments in the namespace and find ones matching the pattern
+	deployments, err := k8sClient.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil || len(deployments.Items) == 0 {
+		return ""
+	}
+
+	// Look for deployment matching pattern: ms-{path-name}-llm-d-modelservice-decode
+	for _, deployment := range deployments.Items {
+		deploymentName := deployment.Name
+		if strings.HasPrefix(deploymentName, "ms-") && strings.HasSuffix(deploymentName, "-llm-d-modelservice-decode") {
+			pathNameFromDeployment := deploymentName[len("ms-") : len(deploymentName)-len("-llm-d-modelservice-decode")]
+			_, _ = fmt.Fprintf(GinkgoWriter, "Discovered path name '%s' from deployment '%s' in namespace '%s'\n",
+				pathNameFromDeployment, deploymentName, namespace)
+			return pathNameFromDeployment
+		}
+	}
+
+	return ""
+}
+
+// deriveDeploymentName discovers the deployment name from existing deployments in the namespace.
+// Falls back to namespace suffix if discovery fails.
+func deriveDeploymentName(namespace string) string {
+	// Try to discover from existing deployments
+	pathName := discoverPathNameFromDeployments(namespace)
+	if pathName != "" {
+		return fmt.Sprintf("ms-%s-llm-d-modelservice-decode", pathName)
+	}
+
+	// Fallback: use namespace suffix
+	const prefix = "llm-d-"
+	if strings.HasPrefix(namespace, prefix) {
+		pathName = namespace[len(prefix):]
+	} else {
+		pathName = namespace
+	}
+	return fmt.Sprintf("ms-%s-llm-d-modelservice-decode", pathName)
+}
+
+// deriveGatewayName discovers the gateway name from existing deployments in the namespace.
+// Falls back to namespace suffix if discovery fails.
+func deriveGatewayName(namespace string) string {
+	// Try to discover from existing deployments
+	pathName := discoverPathNameFromDeployments(namespace)
+	if pathName != "" {
+		return fmt.Sprintf("infra-%s-inference-gateway-istio", pathName)
+	}
+
+	// Fallback: use namespace suffix
+	const prefix = "llm-d-"
+	if strings.HasPrefix(namespace, prefix) {
+		pathName = namespace[len(prefix):]
+	} else {
+		pathName = namespace
+	}
+	return fmt.Sprintf("infra-%s-inference-gateway-istio", pathName)
+}
+
+// getDeploymentName returns the deployment name, auto-deriving from namespace if not set
+func getDeploymentName() string {
+	if deployment != "" {
+		return deployment
+	}
+	return deriveDeploymentName(llmDNamespace)
+}
+
+// getGatewayName returns the gateway name, auto-deriving from namespace if not set
+func getGatewayName() string {
+	if gatewayName != "" {
+		return gatewayName
+	}
+	return deriveGatewayName(llmDNamespace)
+}
 
 var (
 	k8sClient *kubernetes.Clientset
@@ -139,9 +224,14 @@ var _ = BeforeSuite(func() {
 	if multiModelMode {
 		_, _ = fmt.Fprintf(GinkgoWriter, "LLMD_NAMESPACE_B=%s (multi-model mode enabled)\n", llmDNamespaceB)
 	}
-	_, _ = fmt.Fprintf(GinkgoWriter, "GATEWAY_NAME=%s\n", gatewayName)
+	// Auto-derive gateway and deployment names from namespace if not explicitly set
+	// Note: This is called after k8sClient is initialized, so discovery will work
+	actualGatewayName := getGatewayName()
+	actualDeploymentName := getDeploymentName()
+
+	_, _ = fmt.Fprintf(GinkgoWriter, "GATEWAY_NAME=%s (derived from namespace: %s)\n", actualGatewayName, llmDNamespace)
 	_, _ = fmt.Fprintf(GinkgoWriter, "MODEL_ID=%s\n", modelID)
-	_, _ = fmt.Fprintf(GinkgoWriter, "DEPLOYMENT=%s\n", deployment)
+	_, _ = fmt.Fprintf(GinkgoWriter, "DEPLOYMENT=%s (derived from namespace: %s)\n", actualDeploymentName, llmDNamespace)
 	_, _ = fmt.Fprintf(GinkgoWriter, "REQUEST_RATE=%d\n", requestRate)
 	_, _ = fmt.Fprintf(GinkgoWriter, "NUM_PROMPTS=%d\n", numPrompts)
 
@@ -169,9 +259,10 @@ var _ = BeforeSuite(func() {
 		g.Expect(deploymentList.Items).NotTo(BeEmpty(), "llm-d deployments should exist")
 
 		// Check that vLLM deployment exists
-		vllmDeployment, err := k8sClient.AppsV1().Deployments(llmDNamespace).Get(ctx, deployment, metav1.GetOptions{})
+		deploymentName := getDeploymentName()
+		vllmDeployment, err := k8sClient.AppsV1().Deployments(llmDNamespace).Get(ctx, deploymentName, metav1.GetOptions{})
 		if err != nil {
-			g.Expect(err).NotTo(HaveOccurred(), "vLLM deployment should exist")
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("vLLM deployment %s should exist in namespace %s", deploymentName, llmDNamespace))
 		}
 		g.Expect(vllmDeployment.Status.ReadyReplicas).To(BeNumerically(">", 0), "At least one vLLM replica should be ready")
 	}, 5*time.Minute, 5*time.Second).Should(Succeed())
@@ -186,8 +277,10 @@ var _ = BeforeSuite(func() {
 			g.Expect(deploymentList.Items).NotTo(BeEmpty(), "Model B deployments should exist")
 
 			// Check that Model B vLLM deployment exists
-			vllmDeployment, err := k8sClient.AppsV1().Deployments(llmDNamespaceB).Get(ctx, deployment, metav1.GetOptions{})
-			g.Expect(err).NotTo(HaveOccurred(), "Model B vLLM deployment should exist")
+			// For Model B, derive deployment name from its namespace
+			modelBDeploymentName := deriveDeploymentName(llmDNamespaceB)
+			vllmDeployment, err := k8sClient.AppsV1().Deployments(llmDNamespaceB).Get(ctx, modelBDeploymentName, metav1.GetOptions{})
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Model B vLLM deployment %s should exist in namespace %s", modelBDeploymentName, llmDNamespaceB))
 			g.Expect(vllmDeployment.Status.ReadyReplicas).To(BeNumerically(">", 0), "At least one Model B replica should be ready")
 		}, 5*time.Minute, 5*time.Second).Should(Succeed())
 
@@ -206,16 +299,29 @@ var _ = BeforeSuite(func() {
 	}
 
 	By("verifying that Prometheus Adapter is running")
+	// Note: Prometheus Adapter is required for HPA-based tests but not for PodScrapingSource tests
+	// We check it but don't fail the entire suite if it's not ready (PodScrapingSource tests can still run)
 	Eventually(func(g Gomega) {
 		podList, err := k8sClient.CoreV1().Pods(monitoringNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app.kubernetes.io/name=prometheus-adapter",
 		})
 		if err != nil {
-			g.Expect(err).NotTo(HaveOccurred(), "Should be able to list Prometheus Adapter pods")
+			_, _ = fmt.Fprintf(GinkgoWriter, "Warning: Could not list Prometheus Adapter pods: %v\n", err)
+			return // Don't fail, just log warning
 		}
-		g.Expect(podList.Items).NotTo(BeEmpty(), "Prometheus Adapter pod should exist")
+		if len(podList.Items) == 0 {
+			_, _ = fmt.Fprintf(GinkgoWriter, "Warning: No Prometheus Adapter pods found (required for HPA tests, not for PodScrapingSource tests)\n")
+			return // Don't fail, just log warning
+		}
+		allRunning := true
 		for _, pod := range podList.Items {
-			g.Expect(pod.Status.Phase).To(Equal(corev1.PodRunning), fmt.Sprintf("Prometheus Adapter pod %s should be running", pod.Name))
+			if pod.Status.Phase != corev1.PodRunning {
+				allRunning = false
+				_, _ = fmt.Fprintf(GinkgoWriter, "Warning: Prometheus Adapter pod %s is not running (status: %s)\n", pod.Name, pod.Status.Phase)
+			}
+		}
+		if allRunning {
+			_, _ = fmt.Fprintf(GinkgoWriter, "Prometheus Adapter is running\n")
 		}
 	}, 2*time.Minute, 1*time.Second).Should(Succeed())
 

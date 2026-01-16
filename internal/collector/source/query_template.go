@@ -1,4 +1,4 @@
-package collector
+package source
 
 import (
 	"fmt"
@@ -56,7 +56,7 @@ type QueryList struct {
 }
 
 // NewQueryList creates a new query registry.
-func newQueryList() *QueryList {
+func NewQueryList() *QueryList {
 	return &QueryList{
 		queries: make(map[string]QueryTemplate),
 	}

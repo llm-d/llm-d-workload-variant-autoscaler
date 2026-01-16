@@ -1,4 +1,4 @@
-package collector
+package source
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestCollectorV2(t *testing.T) {
+func TestSource(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Collector V2 Suite")
+	RunSpecs(t, "Source Suite")
 }

@@ -1,8 +1,8 @@
-// Package collector provides metrics collection functionality.
+// Package prometheus provides the Prometheus metrics source implementation.
 //
-// This file implements the Prometheus metrics source that executes
+// This package implements the Prometheus metrics source that executes
 // registered queries and caches results.
-package collector
+package prometheus
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/common/model"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/logging"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils"
 )
@@ -38,32 +39,32 @@ func DefaultPrometheusSourceConfig() PrometheusSourceConfig {
 // PrometheusSource implements MetricsSource for Prometheus backend.
 type PrometheusSource struct {
 	api      promv1.API
-	registry *QueryList // registry stores query templates for this source
+	registry *source.QueryList // registry stores query templates for this source
 	config   PrometheusSourceConfig
 
 	mu    sync.RWMutex // protects the cache and refresh operations
-	cache *Cache
+	cache *source.Cache
 }
 
 // NewPrometheusSource creates a new Prometheus metrics source with a default query registry.
 func NewPrometheusSource(ctx context.Context, api promv1.API, config PrometheusSourceConfig) *PrometheusSource {
 	return &PrometheusSource{
 		api:      api,
-		registry: newQueryList(),
+		registry: source.NewQueryList(),
 		config:   config,
-		cache:    newCache(ctx, config.DefaultTTL, 1*time.Second),
+		cache:    source.NewCache(ctx, config.DefaultTTL, 1*time.Second),
 	}
 }
 
 // QueryList returns the query registry for this source.
 // Use this to register queries specific to this source.
-func (p *PrometheusSource) QueryList() *QueryList {
+func (p *PrometheusSource) QueryList() *source.QueryList {
 	return p.registry
 }
 
 // Refresh executes queries and updates the cache.
 // If spec.Queries is empty, refreshes all registered queries for this source.
-func (p *PrometheusSource) Refresh(ctx context.Context, spec RefreshSpec) (map[string]*MetricResult, error) {
+func (p *PrometheusSource) Refresh(ctx context.Context, spec source.RefreshSpec) (map[string]*source.MetricResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -78,10 +79,10 @@ func (p *PrometheusSource) Refresh(ctx context.Context, spec RefreshSpec) (map[s
 
 	if len(queryNames) == 0 {
 		logger.V(logging.DEBUG).Info("No queries registered for this Prometheus source")
-		return map[string]*MetricResult{}, nil
+		return map[string]*source.MetricResult{}, nil
 	}
 
-	results := make(map[string]*MetricResult)
+	results := make(map[string]*source.MetricResult)
 	var resultsMu sync.Mutex
 
 	// Execute queries concurrently
@@ -98,8 +99,8 @@ func (p *PrometheusSource) Refresh(ctx context.Context, spec RefreshSpec) (map[s
 			resultsMu.Unlock()
 
 			// Update cache with key that includes params
-			cacheKey := BuildCacheKey(queryName, spec.Params)
-			p.cache.set(cacheKey, *result, p.config.DefaultTTL)
+			cacheKey := source.BuildCacheKey(queryName, spec.Params)
+			p.cache.Set(cacheKey, *result, p.config.DefaultTTL)
 		}(name)
 	}
 
@@ -113,19 +114,19 @@ func (p *PrometheusSource) Refresh(ctx context.Context, spec RefreshSpec) (map[s
 }
 
 // executeQuery builds and executes a single query.
-func (p *PrometheusSource) executeQuery(ctx context.Context, queryName string, params map[string]string) *MetricResult {
+func (p *PrometheusSource) executeQuery(ctx context.Context, queryName string, params map[string]string) *source.MetricResult {
 	logger := ctrl.LoggerFrom(ctx)
 
 	// Escape parameter values to prevent PromQL injection
 	escapedParams := make(map[string]string, len(params))
 	for k, v := range params {
-		escapedParams[k] = EscapePromQLValue(v)
+		escapedParams[k] = source.EscapePromQLValue(v)
 	}
 
 	// Build the query string
 	queryStr, err := p.registry.Build(queryName, escapedParams)
 	if err != nil {
-		return &MetricResult{
+		return &source.MetricResult{
 			QueryName:   queryName,
 			CollectedAt: time.Now(),
 			Error:       fmt.Errorf("failed to build query: %w", err),
@@ -143,7 +144,7 @@ func (p *PrometheusSource) executeQuery(ctx context.Context, queryName string, p
 	// Execute query with backoff
 	val, warnings, err := utils.QueryPrometheusWithBackoff(queryCtx, p.api, queryStr)
 	if err != nil {
-		return &MetricResult{
+		return &source.MetricResult{
 			QueryName:   queryName,
 			CollectedAt: time.Now(),
 			Error:       fmt.Errorf("query execution failed: %w", err),
@@ -159,15 +160,15 @@ func (p *PrometheusSource) executeQuery(ctx context.Context, queryName string, p
 	// Parse the result
 	values := p.parseResult(val)
 
-	return &MetricResult{
+	return &source.MetricResult{
 		QueryName:   queryName,
 		Values:      values,
 		CollectedAt: time.Now(),
 	}
 }
 
-// parseResult converts Prometheus query result to MetricValues.
-func (p *PrometheusSource) parseResult(val model.Value) []MetricValue {
+// parseResult converts Prometheus query result to source.MetricValues.
+func (p *PrometheusSource) parseResult(val model.Value) []source.MetricValue {
 	if val == nil {
 		return nil
 	}
@@ -185,8 +186,8 @@ func (p *PrometheusSource) parseResult(val model.Value) []MetricValue {
 }
 
 // parseVector parses a Prometheus vector result.
-func (p *PrometheusSource) parseVector(vec model.Vector) []MetricValue {
-	values := make([]MetricValue, 0, len(vec))
+func (p *PrometheusSource) parseVector(vec model.Vector) []source.MetricValue {
+	values := make([]source.MetricValue, 0, len(vec))
 	for _, sample := range vec {
 		value := float64(sample.Value)
 		fixNaN(&value)
@@ -196,7 +197,7 @@ func (p *PrometheusSource) parseVector(vec model.Vector) []MetricValue {
 			labels[string(k)] = string(v)
 		}
 
-		values = append(values, MetricValue{
+		values = append(values, source.MetricValue{
 			Value:     value,
 			Timestamp: sample.Timestamp.Time(),
 			Labels:    labels,
@@ -206,7 +207,7 @@ func (p *PrometheusSource) parseVector(vec model.Vector) []MetricValue {
 }
 
 // parseScalar parses a Prometheus scalar result.
-func (p *PrometheusSource) parseScalar(scalar *model.Scalar) []MetricValue {
+func (p *PrometheusSource) parseScalar(scalar *model.Scalar) []source.MetricValue {
 	if scalar == nil {
 		return nil
 	}
@@ -214,7 +215,7 @@ func (p *PrometheusSource) parseScalar(scalar *model.Scalar) []MetricValue {
 	value := float64(scalar.Value)
 	fixNaN(&value)
 
-	return []MetricValue{{
+	return []source.MetricValue{{
 		Value:     value,
 		Timestamp: scalar.Timestamp.Time(),
 	}}
@@ -222,8 +223,8 @@ func (p *PrometheusSource) parseScalar(scalar *model.Scalar) []MetricValue {
 
 // parseMatrix parses a Prometheus matrix result (range query).
 // Returns the latest value from each time series.
-func (p *PrometheusSource) parseMatrix(matrix model.Matrix) []MetricValue {
-	values := make([]MetricValue, 0, len(matrix))
+func (p *PrometheusSource) parseMatrix(matrix model.Matrix) []source.MetricValue {
+	values := make([]source.MetricValue, 0, len(matrix))
 	for _, stream := range matrix {
 		if len(stream.Values) == 0 {
 			continue
@@ -239,7 +240,7 @@ func (p *PrometheusSource) parseMatrix(matrix model.Matrix) []MetricValue {
 			labels[string(k)] = string(v)
 		}
 
-		values = append(values, MetricValue{
+		values = append(values, source.MetricValue{
 			Value:     value,
 			Timestamp: latest.Timestamp.Time(),
 			Labels:    labels,
@@ -251,12 +252,12 @@ func (p *PrometheusSource) parseMatrix(matrix model.Matrix) []MetricValue {
 // Get retrieves a cached value for a query with given parameters.
 // The cache key is constructed from both queryName and params.
 // Returns nil if not cached or expired.
-func (p *PrometheusSource) Get(queryName string, params map[string]string) *CachedValue {
+func (p *PrometheusSource) Get(queryName string, params map[string]string) *source.CachedValue {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	cacheKey := BuildCacheKey(queryName, params)
-	cached, ok := p.cache.get(cacheKey)
+	cacheKey := source.BuildCacheKey(queryName, params)
+	cached, ok := p.cache.Get(cacheKey)
 	if !ok {
 		return nil
 	}
@@ -270,19 +271,19 @@ func (p *PrometheusSource) Get(queryName string, params map[string]string) *Cach
 
 // MustGet retrieves a cached result or refreshes if expired.
 // This is a convenience method for cases where you always want a result.
-func (p *PrometheusSource) MustGet(ctx context.Context, queryName string, params map[string]string) *MetricResult {
+func (p *PrometheusSource) MustGet(ctx context.Context, queryName string, params map[string]string) *source.MetricResult {
 	cached := p.Get(queryName, params)
 	if cached != nil {
 		return &cached.Result
 	}
 
 	// Not cached or expired, refresh this specific query
-	results, err := p.Refresh(ctx, RefreshSpec{
+	results, err := p.Refresh(ctx, source.RefreshSpec{
 		Queries: []string{queryName},
 		Params:  params,
 	})
 	if err != nil {
-		return &MetricResult{
+		return &source.MetricResult{
 			QueryName:   queryName,
 			CollectedAt: time.Now(),
 			Error:       err,
@@ -293,7 +294,7 @@ func (p *PrometheusSource) MustGet(ctx context.Context, queryName string, params
 		return result
 	}
 
-	return &MetricResult{
+	return &source.MetricResult{
 		QueryName:   queryName,
 		CollectedAt: time.Now(),
 		Error:       fmt.Errorf("query %q not found in results", queryName),
@@ -310,7 +311,7 @@ func fixNaN(v *float64) {
 }
 
 // countSuccessful counts results without errors.
-func countSuccessful(results map[string]*MetricResult) int {
+func countSuccessful(results map[string]*source.MetricResult) int {
 	count := 0
 	for _, r := range results {
 		if r != nil && r.Error == nil {

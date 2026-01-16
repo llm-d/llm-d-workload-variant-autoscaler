@@ -9,7 +9,8 @@ import (
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
 
-	collector "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/v2"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source/prometheus"
 )
 
 // mockPrometheusAPI implements promv1.API for testing
@@ -87,33 +88,33 @@ func (m *mockPrometheusAPI) WalReplay(ctx context.Context) (v1.WalReplayStatus, 
 var _ = Describe("RegisterScaleToZeroQueries", func() {
 	var (
 		ctx      context.Context
-		registry *collector.SourceRegistry
+		registry *source.SourceRegistry
 		mockAPI  *mockPrometheusAPI
 	)
 
 	BeforeEach(func() {
 		ctx = context.Background()
-		registry = collector.NewSourceRegistry()
+		registry = source.NewSourceRegistry()
 		mockAPI = &mockPrometheusAPI{}
 	})
 
 	Context("when prometheus source is registered", func() {
 		BeforeEach(func() {
-			source := collector.NewPrometheusSource(ctx, mockAPI, collector.DefaultPrometheusSourceConfig())
-			err := registry.Register("prometheus", source)
+			metricsSource := prometheus.NewPrometheusSource(ctx, mockAPI, prometheus.DefaultPrometheusSourceConfig())
+			err := registry.Register("prometheus", metricsSource)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("should register the model request count query", func() {
 			RegisterScaleToZeroQueries(registry)
 
-			source := registry.Get("prometheus")
-			Expect(source).NotTo(BeNil())
+			metricsSource := registry.Get("prometheus")
+			Expect(metricsSource).NotTo(BeNil())
 
-			query := source.QueryList().Get(QueryModelRequestCount)
+			query := metricsSource.QueryList().Get(QueryModelRequestCount)
 			Expect(query).NotTo(BeNil())
 			Expect(query.Name).To(Equal(QueryModelRequestCount))
-			Expect(query.Type).To(Equal(collector.QueryTypePromQL))
+			Expect(query.Type).To(Equal(source.QueryTypePromQL))
 		})
 	})
 
@@ -128,15 +129,15 @@ var _ = Describe("RegisterScaleToZeroQueries", func() {
 
 var _ = Describe("CollectModelRequestCount", func() {
 	var (
-		ctx      context.Context
-		registry *collector.SourceRegistry
-		mockAPI  *mockPrometheusAPI
-		source   collector.MetricsSource
+		ctx           context.Context
+		registry      *source.SourceRegistry
+		mockAPI       *mockPrometheusAPI
+		metricsSource source.MetricsSource
 	)
 
 	BeforeEach(func() {
 		ctx = context.Background()
-		registry = collector.NewSourceRegistry()
+		registry = source.NewSourceRegistry()
 	})
 
 	Context("when metrics are available", func() {
@@ -149,14 +150,14 @@ var _ = Describe("CollectModelRequestCount", func() {
 					}, nil, nil
 				},
 			}
-			source = collector.NewPrometheusSource(ctx, mockAPI, collector.DefaultPrometheusSourceConfig())
-			err := registry.Register("prometheus", source)
+			metricsSource = prometheus.NewPrometheusSource(ctx, mockAPI, prometheus.DefaultPrometheusSourceConfig())
+			err := registry.Register("prometheus", metricsSource)
 			Expect(err).NotTo(HaveOccurred())
 			RegisterScaleToZeroQueries(registry)
 		})
 
 		It("should return the request count", func() {
-			count, err := CollectModelRequestCount(ctx, source, "my-model", "default", 10*time.Minute)
+			count, err := CollectModelRequestCount(ctx, metricsSource, "my-model", "default", 10*time.Minute)
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(100.5))
@@ -170,14 +171,14 @@ var _ = Describe("CollectModelRequestCount", func() {
 					return model.Vector{}, nil, nil
 				},
 			}
-			source = collector.NewPrometheusSource(ctx, mockAPI, collector.DefaultPrometheusSourceConfig())
-			err := registry.Register("prometheus", source)
+			metricsSource = prometheus.NewPrometheusSource(ctx, mockAPI, prometheus.DefaultPrometheusSourceConfig())
+			err := registry.Register("prometheus", metricsSource)
 			Expect(err).NotTo(HaveOccurred())
 			RegisterScaleToZeroQueries(registry)
 		})
 
 		It("should return 0", func() {
-			count, err := CollectModelRequestCount(ctx, source, "my-model", "default", 10*time.Minute)
+			count, err := CollectModelRequestCount(ctx, metricsSource, "my-model", "default", 10*time.Minute)
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(0.0))
@@ -191,14 +192,14 @@ var _ = Describe("CollectModelRequestCount", func() {
 					return nil, nil, context.DeadlineExceeded
 				},
 			}
-			source = collector.NewPrometheusSource(ctx, mockAPI, collector.DefaultPrometheusSourceConfig())
-			err := registry.Register("prometheus", source)
+			metricsSource = prometheus.NewPrometheusSource(ctx, mockAPI, prometheus.DefaultPrometheusSourceConfig())
+			err := registry.Register("prometheus", metricsSource)
 			Expect(err).NotTo(HaveOccurred())
 			RegisterScaleToZeroQueries(registry)
 		})
 
 		It("should return 0 without error", func() {
-			count, err := CollectModelRequestCount(ctx, source, "my-model", "default", 10*time.Minute)
+			count, err := CollectModelRequestCount(ctx, metricsSource, "my-model", "default", 10*time.Minute)
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(0.0))
@@ -218,14 +219,14 @@ var _ = Describe("CollectModelRequestCount", func() {
 					}, nil, nil
 				},
 			}
-			source = collector.NewPrometheusSource(ctx, mockAPI, collector.DefaultPrometheusSourceConfig())
-			err := registry.Register("prometheus", source)
+			metricsSource = prometheus.NewPrometheusSource(ctx, mockAPI, prometheus.DefaultPrometheusSourceConfig())
+			err := registry.Register("prometheus", metricsSource)
 			Expect(err).NotTo(HaveOccurred())
 			RegisterScaleToZeroQueries(registry)
 		})
 
 		It("should format retention period correctly in query", func() {
-			_, _ = CollectModelRequestCount(ctx, source, "test-model", "test-ns", 15*time.Minute)
+			_, _ = CollectModelRequestCount(ctx, metricsSource, "test-model", "test-ns", 15*time.Minute)
 
 			Expect(capturedQuery).NotTo(BeEmpty())
 			Expect(capturedQuery).To(ContainSubstring("[15m]"))

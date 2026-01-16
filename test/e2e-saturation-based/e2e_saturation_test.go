@@ -1047,6 +1047,94 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 
 		_, _ = fmt.Fprintf(GinkgoWriter, "Cleanup completed for multiple VAs Saturation-based E2E tests\n")
 	})
+
+	// PodScrapingSource tests using real EPP pods from llm-d-sim deployment
+	var _ = Describe("PodScrapingSource - Real EPP Pods", Ordered, func() {
+		var (
+			testInferencePoolName string
+			testNamespace         = llmDNamespace
+			ctx                   context.Context
+		)
+
+		BeforeAll(func() {
+			if os.Getenv("KUBECONFIG") == "" {
+				Skip("KUBECONFIG is not set; skipping PodScrapingSource test")
+			}
+
+			initializeK8sClient()
+			ctx = context.Background()
+
+			// Discover existing EPP pods by finding services with "-epp" suffix
+			By("discovering existing EPP service")
+			serviceList, err := k8sClient.CoreV1().Services(testNamespace).List(ctx, metav1.ListOptions{})
+			Expect(err).NotTo(HaveOccurred(), "Should be able to list services")
+
+			// Find first EPP service (service name ends with "-epp")
+			for _, svc := range serviceList.Items {
+				if len(svc.Name) > 4 && svc.Name[len(svc.Name)-4:] == "-epp" {
+					// Extract InferencePool name from service name (remove "-epp" suffix)
+					testInferencePoolName = svc.Name[:len(svc.Name)-4]
+					_, _ = fmt.Fprintf(GinkgoWriter, "Found EPP service: %s, InferencePool: %s\n", svc.Name, testInferencePoolName)
+					break
+				}
+			}
+
+			if testInferencePoolName == "" {
+				Skip("No EPP service found in namespace; skipping PodScrapingSource test. Ensure llm-d-sim is deployed with EPP.")
+			}
+
+			// Verify EPP pods exist and are Ready
+			By("verifying EPP pods are Ready")
+			Eventually(func(g Gomega) {
+				eppServiceName := fmt.Sprintf("%s-epp", testInferencePoolName)
+				pods, err := utils.FindExistingEPPPods(ctx, k8sClient, testNamespace, eppServiceName)
+				g.Expect(err).NotTo(HaveOccurred(), "Should be able to find EPP pods")
+
+				readyCount := 0
+				for _, pod := range pods {
+					for _, condition := range pod.Status.Conditions {
+						if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+							readyCount++
+							break
+						}
+					}
+				}
+				g.Expect(readyCount).To(BeNumerically(">=", 1), "Should have at least one Ready EPP pod")
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
+		})
+
+		// Run shared PodScrapingSource tests with Kind/real EPP configuration
+		// Use a closure to capture k8sClient and crClient at runtime
+		Context("with real EPP pods", func() {
+			var metricsSecretName string
+
+			BeforeAll(func() {
+				// Discover or create metrics reader secret
+				By("discovering metrics reader secret")
+				eppServiceName := fmt.Sprintf("%s-epp", testInferencePoolName)
+				var err error
+				metricsSecretName, err = utils.DiscoverMetricsReaderSecret(ctx, k8sClient, crClient, testNamespace, eppServiceName)
+				Expect(err).NotTo(HaveOccurred(), "Should be able to discover or create metrics secret")
+				_, _ = fmt.Fprintf(GinkgoWriter, "Using metrics secret: %s\n", metricsSecretName)
+			})
+
+			utils.DescribePodScrapingSourceTests(func() utils.PodScrapingTestConfig {
+				return utils.PodScrapingTestConfig{
+					Environment:             "kind",
+					ServiceName:             fmt.Sprintf("%s-epp", testInferencePoolName),
+					ServiceNamespace:        testNamespace,
+					MetricsPort:             9090,
+					MetricsPath:             "/metrics",
+					MetricsScheme:           "http",
+					MetricsReaderSecretName: metricsSecretName,
+					MetricsReaderSecretKey:  "token",
+					K8sClient:               k8sClient,
+					CRClient:                crClient,
+					Ctx:                     ctx,
+				}
+			})
+		})
+	})
 })
 
 var _ = Describe("VariantAutoscaling Target Condition", Ordered, func() {

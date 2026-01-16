@@ -31,7 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	llmdVariantAutoscalingV1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
-	collectorv2 "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/v2"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source/prometheus"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/config"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/common"
 	interfaces "github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
@@ -388,8 +389,8 @@ data:
 			}
 
 			// Initialize MetricsCollector with mock Prometheus API
-			sourceRegistry := collectorv2.NewSourceRegistry()
-			promSource := collectorv2.NewPrometheusSource(ctx, mockPromAPI, collectorv2.DefaultPrometheusSourceConfig())
+			sourceRegistry := source.NewSourceRegistry()
+			promSource := prometheus.NewPrometheusSource(ctx, mockPromAPI, prometheus.DefaultPrometheusSourceConfig())
 			sourceRegistry.Register("prometheus", promSource) // nolint:errcheck
 			engine := NewEngine(k8sClient, k8sClient.Scheme(), nil, sourceRegistry)
 
@@ -452,8 +453,8 @@ data:
 			}
 
 			By("Converting saturation targets to decisions")
-			sourceRegistry := collectorv2.NewSourceRegistry()
-			sourceRegistry.Register("prometheus", collectorv2.NewNoOpSource()) // nolint:errcheck
+			sourceRegistry := source.NewSourceRegistry()
+			sourceRegistry.Register("prometheus", source.NewNoOpSource()) // nolint:errcheck
 			engine := NewEngine(k8sClient, k8sClient.Scheme(), nil, sourceRegistry)
 			decisions := engine.convertSaturationTargetsToDecisions(context.Background(), saturationTargets, saturationAnalysis, variantStates)
 
@@ -473,11 +474,11 @@ data:
 		})
 	})
 
-	Context("Collector V2 Optimization Tests", func() {
+	Context("Source Infrastructure Optimization Tests", func() {
 		const totalVAs = 3
 		const configMapName = "workload-variant-autoscaler-variantautoscaling-config"
 		var configMapNamespace = getNamespace()
-		var sourceRegistry *collectorv2.SourceRegistry
+		var sourceRegistry *source.SourceRegistry
 		var mockPromAPI *testutils.MockPromAPI
 
 		BeforeEach(func() {
@@ -499,8 +500,8 @@ data:
 			}
 
 			By("creating the source registry with mock Prometheus API")
-			sourceRegistry = collectorv2.NewSourceRegistry()
-			promSource := collectorv2.NewPrometheusSource(ctx, mockPromAPI, collectorv2.DefaultPrometheusSourceConfig())
+			sourceRegistry = source.NewSourceRegistry()
+			promSource := prometheus.NewPrometheusSource(ctx, mockPromAPI, prometheus.DefaultPrometheusSourceConfig())
 			sourceRegistry.Register("prometheus", promSource) // nolint:errcheck
 
 			By("creating the required configmaps")
@@ -518,7 +519,7 @@ data:
 			configMap = testutils.CreateVariantAutoscalingConfigMap(configMapName, ns.Name)
 			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
 
-			By("Creating VariantAutoscaling resources and Deployments for v2 collector tests")
+			By("Creating VariantAutoscaling resources and Deployments for source infrastructure tests")
 			for i := range totalVAs {
 				modelID := fmt.Sprintf("v2-model-%d-model-%d", i, i)
 				name := fmt.Sprintf("v2-test-resource-%d", i)
@@ -628,7 +629,7 @@ data:
 
 		})
 
-		It("should successfully run optimization with v2 collector", func() {
+		It("should successfully run optimization with source infrastructure", func() {
 
 			// Initialize legacy MetricsCollector for non-saturation metrics
 			engine := NewEngine(k8sClient, k8sClient.Scheme(), nil, sourceRegistry)
@@ -638,7 +639,7 @@ data:
 				"default": {},
 			})
 
-			By("Performing optimization loop with v2 collector")
+			By("Performing optimization loop with source infrastructure")
 			err := engine.optimize(ctx)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -648,13 +649,13 @@ data:
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify VAs were processed
-			v2VAs := 0
+			testVAs := 0
 			for _, va := range variantAutoscalingList.Items {
 				if strings.HasPrefix(va.Name, "v2-test-resource") && va.DeletionTimestamp.IsZero() {
-					v2VAs++
+					testVAs++
 				}
 			}
-			Expect(v2VAs).To(Equal(totalVAs), "Expected all v2 test VAs to be present")
+			Expect(testVAs).To(Equal(totalVAs), "Expected all test VAs to be present")
 		})
 
 	})

@@ -35,11 +35,11 @@ import (
 	llmdVariantAutoscalingV1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
 	actuator "github.com/llm-d-incubation/workload-variant-autoscaler/internal/actuator"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector"
-	collectorv2 "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/v2"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/registration"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/common"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/executor"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/limiter"
-	saturationmetrics "github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/saturation/metrics"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/logging"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/saturation"
@@ -61,8 +61,8 @@ type Engine struct {
 
 	Recorder record.EventRecorder
 
-	// ReplicaMetricsCollectorV2 is the v2 collector for replica metrics
-	ReplicaMetricsCollectorV2 *saturationmetrics.ReplicaMetricsCollector
+	// ReplicaMetricsCollector is the collector for replica metrics using the source infrastructure
+	ReplicaMetricsCollector *collector.ReplicaMetricsCollector
 }
 
 // getVariantKey returns a unique key for a variant combining namespace and name.
@@ -72,14 +72,14 @@ func getVariantKey(namespace, name string) string {
 }
 
 // NewEngine creates a new instance of the saturation engine.
-func NewEngine(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, metricsRegistry *collectorv2.SourceRegistry) *Engine {
+func NewEngine(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, metricsRegistry *source.SourceRegistry) *Engine {
 	promSource := metricsRegistry.Get("prometheus") // assume prometheus source is registered
 
 	engine := Engine{
-		client:                    client,
-		scheme:                    scheme,
-		Recorder:                  recorder,
-		ReplicaMetricsCollectorV2: saturationmetrics.NewReplicaMetricsCollector(promSource, client),
+		client:                  client,
+		scheme:                  scheme,
+		Recorder:                recorder,
+		ReplicaMetricsCollector: collector.NewReplicaMetricsCollector(promSource, client),
 	}
 
 	engine.executor = executor.NewPollingExecutor(executor.PollingConfig{
@@ -91,7 +91,7 @@ func NewEngine(client client.Client, scheme *runtime.Scheme, recorder record.Eve
 	})
 
 	// Register saturation-specific queries in the metrics registry
-	saturationmetrics.RegisterSaturationQueries(metricsRegistry)
+	registration.RegisterSaturationQueries(metricsRegistry)
 
 	return &engine
 }
@@ -448,11 +448,11 @@ func (e *Engine) RunSaturationAnalysis(
 		variantCosts[deploy.Name] = cost
 	}
 
-	// Collect Saturation metrics using v2 collector
-	logger.V(logging.DEBUG).Info("Using v2 collector for replica metrics",
+	// Collect Saturation metrics using source infrastructure
+	logger.V(logging.DEBUG).Info("Using source infrastructure for replica metrics",
 		"modelID", modelID,
 		"namespace", namespace)
-	replicaMetrics, err := e.ReplicaMetricsCollectorV2.CollectReplicaMetrics(ctx, modelID, namespace, deployments, variantAutoscalings, variantCosts)
+	replicaMetrics, err := e.ReplicaMetricsCollector.CollectReplicaMetrics(ctx, modelID, namespace, deployments, variantAutoscalings, variantCosts)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to collect Saturation metrics for model %s: %w", modelID, err)
 	}

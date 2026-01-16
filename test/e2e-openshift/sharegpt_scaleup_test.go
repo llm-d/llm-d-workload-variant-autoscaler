@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -93,15 +94,17 @@ type modelTestConfig struct {
 
 // getModelsToTest returns the list of models to test based on configuration
 func getModelsToTest() []modelTestConfig {
-	// Gateway service name pattern for llm-d infrastructure
-	// This is created by the llm-d-infra chart
-	gatewayServiceName := "infra-inference-scheduling-inference-gateway-istio"
+	// Auto-derive gateway and deployment names from namespace
+	// Gateway service name pattern: infra-{path-name}-inference-gateway-istio
+	// Deployment name pattern: ms-{path-name}-llm-d-modelservice-decode
+	gatewayServiceName := getGatewayName()
+	deploymentName := getDeploymentName()
 
 	models := []modelTestConfig{
 		{
 			name:              "Model A1",
 			namespace:         llmDNamespace,
-			deployment:        deployment,
+			deployment:        deploymentName,
 			gatewayService:    gatewayServiceName,
 			maxTokens:         400,  // Moderate tokens for ~3s requests, sustains queue during test
 			requestsPerWorker: 1000, // Balanced request count for moderate-length requests
@@ -110,13 +113,16 @@ func getModelsToTest() []modelTestConfig {
 
 	// Add Model B if secondary namespace is configured (multi-model mode)
 	if multiModelMode && llmDNamespaceB != "" {
+		// Derive Model B names from its namespace
+		modelBGatewayName := deriveGatewayName(llmDNamespaceB)
+		modelBDeploymentName := deriveDeploymentName(llmDNamespaceB)
 		models = append(models, modelTestConfig{
 			name:              "Model B",
 			namespace:         llmDNamespaceB,
-			deployment:        deployment, // Model B uses the same deployment name as A1
-			gatewayService:    gatewayServiceName,
-			maxTokens:         1500, // Long requests to test sustained GPU load
-			requestsPerWorker: 500,  // Fewer requests since each takes ~10s
+			deployment:        modelBDeploymentName, // Derive from Model B namespace
+			gatewayService:    modelBGatewayName,    // Derive from Model B namespace
+			maxTokens:         1500,                 // Long requests to test sustained GPU load
+			requestsPerWorker: 500,                  // Fewer requests since each takes ~10s
 		})
 	}
 
@@ -130,8 +136,11 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 		ctx = context.Background()
 	})
 
-	// Test each model sequentially
+	// Get models to test - called at package init so tests are discovered by Ginkgo
+	// Auto-discovery will work if k8sClient is available, otherwise falls back to namespace derivation
 	models := getModelsToTest()
+
+	// Test each model sequentially
 	for _, model := range models {
 		// Capture model in closure
 		model := model
@@ -152,6 +161,17 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 			)
 
 			BeforeAll(func() {
+				// Re-discover deployment and gateway names now that k8sClient is initialized
+				// This ensures we use the correct names even if getModelsToTest()
+				// was called before k8sClient was available
+				if model.namespace == llmDNamespace {
+					model.deployment = getDeploymentName()
+					model.gatewayService = getGatewayName()
+				} else if multiModelMode && model.namespace == llmDNamespaceB {
+					model.deployment = deriveDeploymentName(llmDNamespaceB)
+					model.gatewayService = deriveGatewayName(llmDNamespaceB)
+				}
+
 				// Use sanitized model name for Kubernetes resource names
 				sanitizedName = sanitizeK8sName(model.name)
 				jobBaseName = fmt.Sprintf("load-gen-%s", sanitizedName)
@@ -160,6 +180,7 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 				_, _ = fmt.Fprintf(GinkgoWriter, "Starting test for %s\n", model.name)
 				_, _ = fmt.Fprintf(GinkgoWriter, "  Namespace: %s\n", model.namespace)
 				_, _ = fmt.Fprintf(GinkgoWriter, "  Deployment: %s\n", model.deployment)
+				_, _ = fmt.Fprintf(GinkgoWriter, "  Gateway: %s\n", model.gatewayService)
 				_, _ = fmt.Fprintf(GinkgoWriter, "========================================\n\n")
 
 				By(fmt.Sprintf("recording initial state of %s deployment", model.name))
@@ -227,14 +248,21 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 				Expect(vaList.Items).NotTo(BeEmpty(), "At least one WVA VariantAutoscaling should exist")
 
 				// Select the VA that targets the expected deployment
+				// Note: If scaleTargetRef exists, use it; otherwise match by modelID
 				var va *v1alpha1.VariantAutoscaling
 				for i := range vaList.Items {
-					if vaList.Items[i].Spec.ScaleTargetRef.Name == model.deployment {
+					// Try to match by scaleTargetRef if it exists
+					if vaList.Items[i].Spec.ScaleTargetRef.Name != "" && vaList.Items[i].Spec.ScaleTargetRef.Name == model.deployment {
+						va = &vaList.Items[i]
+						break
+					}
+					// Fallback: match by modelID if scaleTargetRef doesn't exist (older CRD schema)
+					if vaList.Items[i].Spec.ModelID == modelID {
 						va = &vaList.Items[i]
 						break
 					}
 				}
-				Expect(va).NotTo(BeNil(), "A VariantAutoscaling targeting deployment %s should exist", model.deployment)
+				Expect(va).NotTo(BeNil(), "A VariantAutoscaling targeting deployment %s or model %s should exist", model.deployment, modelID)
 				vaName = va.Name
 				_, _ = fmt.Fprintf(GinkgoWriter, "Found VariantAutoscaling: %s (targets %s)\n", vaName, model.deployment)
 
@@ -732,3 +760,88 @@ func logLoadGenJobLogs(ctx context.Context, baseName, namespace string, numWorke
 func ptr(i int64) *int64 {
 	return &i
 }
+
+// PodScrapingSource tests using existing EPP pods in OpenShift cluster
+var _ = Describe("PodScrapingSource - OpenShift Existing EPP Pods", Ordered, func() {
+	var (
+		testInferencePoolName string
+		testNamespace         = llmDNamespace
+		ctx                   context.Context
+	)
+
+	BeforeAll(func() {
+		if os.Getenv("KUBECONFIG") == "" {
+			Skip("KUBECONFIG is not set; skipping PodScrapingSource test")
+		}
+
+		ctx = context.Background()
+
+		// Discover existing EPP pods by finding services with "-epp" suffix
+		By("discovering existing EPP service")
+		serviceList, err := k8sClient.CoreV1().Services(testNamespace).List(ctx, metav1.ListOptions{})
+		Expect(err).NotTo(HaveOccurred(), "Should be able to list services")
+
+		// Find first EPP service (service name ends with "-epp")
+		for _, svc := range serviceList.Items {
+			if len(svc.Name) > 4 && svc.Name[len(svc.Name)-4:] == "-epp" {
+				// Extract InferencePool name from service name (remove "-epp" suffix)
+				testInferencePoolName = svc.Name[:len(svc.Name)-4]
+				_, _ = fmt.Fprintf(GinkgoWriter, "Found EPP service: %s, InferencePool: %s\n", svc.Name, testInferencePoolName)
+				break
+			}
+		}
+
+		if testInferencePoolName == "" {
+			Skip("No EPP service found in namespace; skipping PodScrapingSource test")
+		}
+
+		// Verify EPP pods exist and are Ready
+		By("verifying EPP pods are Ready")
+		Eventually(func(g Gomega) {
+			eppServiceName := fmt.Sprintf("%s-epp", testInferencePoolName)
+			pods, err := utils.FindExistingEPPPods(ctx, k8sClient, testNamespace, eppServiceName)
+			g.Expect(err).NotTo(HaveOccurred(), "Should be able to find EPP pods")
+
+			readyCount := 0
+			for _, pod := range pods {
+				for _, condition := range pod.Status.Conditions {
+					if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+						readyCount++
+						break
+					}
+				}
+			}
+			g.Expect(readyCount).To(BeNumerically(">=", 1), "Should have at least one Ready EPP pod")
+		}, 2*time.Minute, 5*time.Second).Should(Succeed())
+	})
+
+	// Run shared PodScrapingSource tests with OpenShift configuration
+	// Use a closure to capture k8sClient and crClient at runtime
+	var metricsSecretName string
+
+	BeforeAll(func() {
+		// Discover or create metrics reader secret
+		By("discovering metrics reader secret")
+		eppServiceName := fmt.Sprintf("%s-epp", testInferencePoolName)
+		var err error
+		metricsSecretName, err = utils.DiscoverMetricsReaderSecret(ctx, k8sClient, crClient, testNamespace, eppServiceName)
+		Expect(err).NotTo(HaveOccurred(), "Should be able to discover or create metrics secret")
+		_, _ = fmt.Fprintf(GinkgoWriter, "Using metrics secret: %s\n", metricsSecretName)
+	})
+
+	utils.DescribePodScrapingSourceTests(func() utils.PodScrapingTestConfig {
+		return utils.PodScrapingTestConfig{
+			Environment:             "openshift",
+			ServiceName:             fmt.Sprintf("%s-epp", testInferencePoolName),
+			ServiceNamespace:        testNamespace,
+			MetricsPort:             9090,
+			MetricsPath:             "/metrics",
+			MetricsScheme:           "http",
+			MetricsReaderSecretName: metricsSecretName,
+			MetricsReaderSecretKey:  "token",
+			K8sClient:               k8sClient,
+			CRClient:                crClient,
+			Ctx:                     ctx,
+		}
+	})
+})

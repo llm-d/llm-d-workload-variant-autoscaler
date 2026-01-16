@@ -9,8 +9,10 @@ import (
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/constants"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // The following utility functions are used to create Prometheus queries for testing
@@ -133,6 +135,105 @@ func CreateVariantAutoscalingConfigMap(cmName, controllerNamespace string) *core
 			"DISABLING_TTFT":      "false", // TODO: this will be removed in future releases once llm-d-sim supports TTFT metrics
 		},
 	}
+}
+
+// MakeService creates a wrapper for a Service.
+func MakeService(name, namespace string) *corev1.Service {
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app": "epp-svc", // Matches the labels on the target Pods
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "http-metrics",
+					Protocol:   corev1.ProtocolTCP,
+					Port:       9090,
+					TargetPort: intstr.FromInt(9090),
+					NodePort:   30007,
+				},
+			},
+			Type: corev1.ServiceTypeNodePort, // Exposes the service on a static port on each Node's IP
+		},
+	}
+}
+
+func MakeDeployment(deploymentName, namespace string, replicas int32, labels map[string]string) *appsv1.Deployment {
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      deploymentName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"app": "pool1",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": "pool1",
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:            "vllm",
+							Image:           "ghcr.io/llm-d/llm-d-inference-sim:latest",
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Args: []string{
+								"--port=8000",
+								"--model=unsloth/Meta-Llama-3.1-8B",
+								"--enable-kvcache=false",
+								"--kv-cache-size=1024",
+								"--block-size=16",
+								"--zmq-endpoint=tcp://epp-pool1-svc.pool1-ns.svc.cluster.local:5557",
+								"--event-batch-size=16",
+								"--tokenizers-cache-dir=/tokenizer-cache",
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "http",
+									Protocol:      corev1.ProtocolTCP,
+									ContainerPort: 8000,
+								},
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name:  "PORT",
+									Value: "8000",
+								},
+								{
+									Name:  "PYTHONHASHSEED",
+									Value: "42",
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									MountPath: "/tokenizer-cache",
+									Name:      "tokenizer-cache",
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name:         "tokenizer-cache",
+							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+						},
+					},
+				},
+			},
+		},
+	}
+	return deployment
 }
 
 // MockPromAPI is a mock implementation of promv1.API for testing

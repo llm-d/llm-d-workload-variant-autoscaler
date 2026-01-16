@@ -14,9 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package metrics provides metrics collection functionality for the saturation engine
-// using the v2 collector infrastructure.
-package metrics
+// Package collector provides replica metrics collection functionality.
+//
+// This package provides ReplicaMetricsCollector which collects replica-level
+// metrics for saturation analysis using the source infrastructure.
+package collector
 
 import (
 	"context"
@@ -28,53 +30,35 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	llmdVariantAutoscalingV1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
-	collector "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/v2"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/registration"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/logging"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/saturation"
 )
 
-const (
-	// DefaultMetricStalenessThreshold is the default threshold for considering metrics stale.
-	// Metrics older than this threshold are filtered out to avoid using data from terminated pods.
-	// This replaces the kube-state-metrics approach with timestamp-based filtering.
-	DefaultMetricStalenessThreshold = 2 * time.Minute
-)
-
 // ReplicaMetricsCollector collects replica-level metrics for saturation analysis
-// using the v2 collector infrastructure.
+// using the source infrastructure.
 type ReplicaMetricsCollector struct {
-	source             collector.MetricsSource
-	k8sClient          client.Client
-	podVAMapper        *collector.PodVAMapper
-	stalenessThreshold time.Duration
+	source      source.MetricsSource
+	k8sClient   client.Client
+	podVAMapper *source.PodVAMapper
 }
 
 // NewReplicaMetricsCollector creates a new replica metrics collector.
-func NewReplicaMetricsCollector(source collector.MetricsSource, k8sClient client.Client) *ReplicaMetricsCollector {
+func NewReplicaMetricsCollector(metricsSource source.MetricsSource, k8sClient client.Client) *ReplicaMetricsCollector {
 	return &ReplicaMetricsCollector{
-		source:             source,
-		k8sClient:          k8sClient,
-		podVAMapper:        collector.NewPodVAMapper(k8sClient),
-		stalenessThreshold: DefaultMetricStalenessThreshold,
-	}
-}
-
-// NewReplicaMetricsCollectorWithThreshold creates a new replica metrics collector with a custom staleness threshold.
-func NewReplicaMetricsCollectorWithThreshold(source collector.MetricsSource, k8sClient client.Client, stalenessThreshold time.Duration) *ReplicaMetricsCollector {
-	return &ReplicaMetricsCollector{
-		source:             source,
-		k8sClient:          k8sClient,
-		podVAMapper:        collector.NewPodVAMapper(k8sClient),
-		stalenessThreshold: stalenessThreshold,
+		source:      metricsSource,
+		k8sClient:   k8sClient,
+		podVAMapper: source.NewPodVAMapper(k8sClient),
 	}
 }
 
 // CollectReplicaMetrics collects KV cache and queue metrics for all replicas of a model
-// using the v2 collector API.
+// using the source infrastructure.
 //
 // This function mirrors the functionality of the original CollectReplicaMetrics in
-// internal/collector/prometheus/saturation_metrics.go but uses the v2 collector
+// internal/collector/prometheus/saturation_metrics.go but uses the source
 // infrastructure with registered query templates.
 //
 // Parameters:
@@ -99,17 +83,17 @@ func (c *ReplicaMetricsCollector) CollectReplicaMetrics(
 	logger := ctrl.LoggerFrom(ctx)
 
 	params := map[string]string{
-		collector.ParamModelID:   modelID,
-		collector.ParamNamespace: namespace,
+		source.ParamModelID:   modelID,
+		source.ParamNamespace: namespace,
 	}
 
 	// Refresh saturation queries (KV cache and queue length)
 	queries := []string{
-		QueryKvCacheUsage,
-		QueryQueueLength,
+		registration.QueryKvCacheUsage,
+		registration.QueryQueueLength,
 	}
 
-	results, err := c.source.Refresh(ctx, collector.RefreshSpec{
+	results, err := c.source.Refresh(ctx, source.RefreshSpec{
 		Queries: queries,
 		Params:  params,
 	})
@@ -127,12 +111,11 @@ func (c *ReplicaMetricsCollector) CollectReplicaMetrics(
 		hasQueue       bool
 	}
 
-	// Extract per-pod metrics from results with timestamps
+	// Extract per-pod metrics from results
 	podData := make(map[string]*podMetricData)
-	now := time.Now()
 
 	// Process KV cache results
-	if result := results[QueryKvCacheUsage]; result != nil {
+	if result := results[registration.QueryKvCacheUsage]; result != nil {
 		if result.HasError() {
 			return nil, fmt.Errorf("KV cache query failed: %w", result.Error)
 		}
@@ -142,17 +125,6 @@ func (c *ReplicaMetricsCollector) CollectReplicaMetrics(
 				podName = value.Labels["pod_name"]
 			}
 			if podName == "" {
-				continue
-			}
-
-			// Check if metric is stale based on timestamp
-			metricAge := now.Sub(value.Timestamp)
-			if metricAge > c.stalenessThreshold {
-				logger.V(logging.VERBOSE).Info("Filtering stale KV cache metric",
-					"pod", podName,
-					"metricAge", metricAge.String(),
-					"threshold", c.stalenessThreshold.String(),
-					"timestamp", value.Timestamp)
 				continue
 			}
 
@@ -166,13 +138,12 @@ func (c *ReplicaMetricsCollector) CollectReplicaMetrics(
 			logger.V(logging.DEBUG).Info("KV cache metric",
 				"pod", podName,
 				"usage", value.Value,
-				"usagePercent", value.Value*100,
-				"metricAge", metricAge.String())
+				"usagePercent", value.Value*100)
 		}
 	}
 
 	// Process queue length results
-	if result := results[QueryQueueLength]; result != nil {
+	if result := results[registration.QueryQueueLength]; result != nil {
 		if result.HasError() {
 			return nil, fmt.Errorf("queue length query failed: %w", result.Error)
 		}
@@ -185,17 +156,6 @@ func (c *ReplicaMetricsCollector) CollectReplicaMetrics(
 				continue
 			}
 
-			// Check if metric is stale based on timestamp
-			metricAge := now.Sub(value.Timestamp)
-			if metricAge > c.stalenessThreshold {
-				logger.V(logging.VERBOSE).Info("Filtering stale queue metric",
-					"pod", podName,
-					"metricAge", metricAge.String(),
-					"threshold", c.stalenessThreshold.String(),
-					"timestamp", value.Timestamp)
-				continue
-			}
-
 			if podData[podName] == nil {
 				podData[podName] = &podMetricData{}
 			}
@@ -205,17 +165,16 @@ func (c *ReplicaMetricsCollector) CollectReplicaMetrics(
 
 			logger.V(logging.DEBUG).Info("Queue metric",
 				"pod", podName,
-				"queueLength", int(value.Value),
-				"metricAge", metricAge.String())
+				"queueLength", int(value.Value))
 		}
 	}
 
-	// Build replica metrics from non-stale pod data
+	// Build replica metrics from pod data
 	replicaMetrics := make([]interfaces.ReplicaMetrics, 0, len(podData))
-	collectedAt := now
+	collectedAt := time.Now()
 
 	for podName, data := range podData {
-		// Skip pods that have no fresh metrics at all
+		// Skip pods that have no metrics at all
 		if !data.hasKv && !data.hasQueue {
 			continue
 		}
@@ -285,7 +244,7 @@ func (c *ReplicaMetricsCollector) CollectReplicaMetrics(
 		replicaMetrics = append(replicaMetrics, metric)
 	}
 
-	logger.V(logging.DEBUG).Info("Collected replica metrics (v2)",
+	logger.V(logging.DEBUG).Info("Collected replica metrics",
 		"modelID", modelID,
 		"namespace", namespace,
 		"replicaCount", len(replicaMetrics))

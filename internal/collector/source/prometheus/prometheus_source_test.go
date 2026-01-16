@@ -1,4 +1,4 @@
-package collector
+package prometheus
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	. "github.com/onsi/gomega"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
+
+	sourcepkg "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
 )
 
 // mockPrometheusAPI implements promv1.API for testing
@@ -86,7 +88,7 @@ func (m *mockPrometheusAPI) WalReplay(ctx context.Context) (v1.WalReplayStatus, 
 var _ = Describe("PrometheusSource", func() {
 	var (
 		mockAPI  *mockPrometheusAPI
-		registry *QueryList
+		registry *sourcepkg.QueryList
 		source   *PrometheusSource
 		ctx      context.Context
 	)
@@ -119,9 +121,9 @@ var _ = Describe("PrometheusSource", func() {
 				QueryTimeout: 5 * time.Second,
 			})
 			registry = source.QueryList()
-			err := registry.Register(QueryTemplate{
+			err := registry.Register(sourcepkg.QueryTemplate{
 				Name:        "test_query",
-				Type:        QueryTypePromQL,
+				Type:        sourcepkg.QueryTypePromQL,
 				Template:    `test_metric{namespace="{{.namespace}}"}`,
 				Params:      []string{"namespace"},
 				Description: "Test query",
@@ -131,7 +133,7 @@ var _ = Describe("PrometheusSource", func() {
 		})
 
 		It("should execute registered queries and return results", func() {
-			results, err := source.Refresh(ctx, RefreshSpec{
+			results, err := source.Refresh(ctx, sourcepkg.RefreshSpec{
 				Params: map[string]string{"namespace": "test-ns"},
 			})
 
@@ -170,9 +172,9 @@ var _ = Describe("PrometheusSource", func() {
 			})
 			registry = source.QueryList()
 
-			err := registry.Register(QueryTemplate{
+			err := registry.Register(sourcepkg.QueryTemplate{
 				Name:        "cached_query",
-				Type:        QueryTypePromQL,
+				Type:        sourcepkg.QueryTypePromQL,
 				Template:    `cached_metric{namespace="{{.namespace}}"}`,
 				Params:      []string{"namespace"},
 				Description: "Cached query test",
@@ -182,7 +184,7 @@ var _ = Describe("PrometheusSource", func() {
 
 		It("should cache results after refresh", func() {
 			params := map[string]string{"namespace": "test-ns"}
-			_, err := source.Refresh(ctx, RefreshSpec{
+			_, err := source.Refresh(ctx, sourcepkg.RefreshSpec{
 				Params: params,
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -196,7 +198,7 @@ var _ = Describe("PrometheusSource", func() {
 
 		It("should return cached values without re-querying", func() {
 			params := map[string]string{"namespace": "test-ns"}
-			_, err := source.Refresh(ctx, RefreshSpec{
+			_, err := source.Refresh(ctx, sourcepkg.RefreshSpec{
 				Params: params,
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -213,12 +215,12 @@ var _ = Describe("PrometheusSource", func() {
 			params2 := map[string]string{"namespace": "ns-2"}
 
 			// Refresh with first params
-			_, err := source.Refresh(ctx, RefreshSpec{Params: params1})
+			_, err := source.Refresh(ctx, sourcepkg.RefreshSpec{Params: params1})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(callCount).To(Equal(1))
 
 			// Refresh with second params
-			_, err = source.Refresh(ctx, RefreshSpec{Params: params2})
+			_, err = source.Refresh(ctx, sourcepkg.RefreshSpec{Params: params2})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(callCount).To(Equal(2))
 
@@ -248,15 +250,15 @@ var _ = Describe("PrometheusSource", func() {
 			source = NewPrometheusSource(context.Background(), mockAPI, DefaultPrometheusSourceConfig())
 			registry = source.QueryList()
 
-			err := registry.Register(QueryTemplate{
+			err := registry.Register(sourcepkg.QueryTemplate{
 				Name:     "query1",
-				Type:     QueryTypePromQL,
+				Type:     sourcepkg.QueryTypePromQL,
 				Template: `metric1`,
 			})
 			Expect(err).ToNot(HaveOccurred())
-			err = registry.Register(QueryTemplate{
+			err = registry.Register(sourcepkg.QueryTemplate{
 				Name:     "query2",
-				Type:     QueryTypePromQL,
+				Type:     sourcepkg.QueryTypePromQL,
 				Template: `metric2`,
 			})
 			Expect(err).ToNot(HaveOccurred())
@@ -340,10 +342,10 @@ var _ = Describe("MetricResult", func() {
 	Describe("IsStale", func() {
 		Context("when result has values with recent timestamps", func() {
 			It("should not be stale within threshold", func() {
-				result := &MetricResult{
+				result := &sourcepkg.MetricResult{
 					QueryName:   "test",
 					CollectedAt: time.Now(),
-					Values: []MetricValue{
+					Values: []sourcepkg.MetricValue{
 						{
 							Value:     1.0,
 							Timestamp: time.Now().Add(-5 * time.Second),
@@ -357,10 +359,10 @@ var _ = Describe("MetricResult", func() {
 
 		Context("when result has values with old timestamps", func() {
 			It("should be stale beyond threshold", func() {
-				result := &MetricResult{
+				result := &sourcepkg.MetricResult{
 					QueryName:   "test",
 					CollectedAt: time.Now(),
-					Values: []MetricValue{
+					Values: []sourcepkg.MetricValue{
 						{
 							Value:     1.0,
 							Timestamp: time.Now().Add(-5 * time.Second),
@@ -374,7 +376,7 @@ var _ = Describe("MetricResult", func() {
 
 		Context("when result has no values", func() {
 			It("should be considered stale", func() {
-				result := &MetricResult{QueryName: "empty"}
+				result := &sourcepkg.MetricResult{QueryName: "empty"}
 
 				Expect(result.IsStale(10 * time.Second)).To(BeTrue())
 			})
@@ -382,7 +384,7 @@ var _ = Describe("MetricResult", func() {
 
 		Context("when result is nil", func() {
 			It("should be considered stale", func() {
-				var result *MetricResult
+				var result *sourcepkg.MetricResult
 
 				Expect(result.IsStale(10 * time.Second)).To(BeTrue())
 			})
@@ -392,9 +394,9 @@ var _ = Describe("MetricResult", func() {
 	Describe("FirstValue", func() {
 		It("should return the first metric value", func() {
 			expectedTime := time.Now().Truncate(time.Second)
-			result := &MetricResult{
+			result := &sourcepkg.MetricResult{
 				QueryName: "test",
-				Values: []MetricValue{
+				Values: []sourcepkg.MetricValue{
 					{
 						Value:     0.85,
 						Timestamp: expectedTime,
@@ -413,11 +415,11 @@ var _ = Describe("MetricResult", func() {
 	})
 })
 
-var _ = Describe("MetricValue", func() {
+var _ = Describe("sourcepkg.MetricValue", func() {
 	Describe("IsStale", func() {
 		Context("when timestamp is within threshold", func() {
 			It("should not be stale", func() {
-				value := MetricValue{
+				value := sourcepkg.MetricValue{
 					Value:     1.0,
 					Timestamp: time.Now().Add(-2 * time.Second),
 				}
@@ -428,7 +430,7 @@ var _ = Describe("MetricValue", func() {
 
 		Context("when timestamp exceeds threshold", func() {
 			It("should be stale", func() {
-				value := MetricValue{
+				value := sourcepkg.MetricValue{
 					Value:     1.0,
 					Timestamp: time.Now().Add(-2 * time.Second),
 				}
@@ -439,7 +441,7 @@ var _ = Describe("MetricValue", func() {
 
 		Context("when timestamp is zero", func() {
 			It("should always be considered stale", func() {
-				value := MetricValue{Value: 1.0}
+				value := sourcepkg.MetricValue{Value: 1.0}
 
 				Expect(value.IsStale(1 * time.Hour)).To(BeTrue())
 			})

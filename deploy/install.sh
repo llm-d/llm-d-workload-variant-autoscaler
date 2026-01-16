@@ -954,7 +954,7 @@ main() {
             fi
         fi
     else
-        log_error "Environment script not found: $SCRIPT_DIR/$ENVIRONMENT/$ENVIRONMENT.sh"
+        log_error "Environment script not found: $SCRIPT_DIR/$ENVIRONMENT/install.sh"
     fi
 
     # Detect GPU type for non-emulated environments

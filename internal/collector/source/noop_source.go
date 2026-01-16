@@ -1,4 +1,4 @@
-package collector
+package source
 
 import (
 	"context"
@@ -13,7 +13,7 @@ type NoOpSource struct {
 // NewNoOpSource creates a new no-op metrics source with an empty query list.
 func NewNoOpSource() *NoOpSource {
 	return &NoOpSource{
-		queryList: newQueryList(),
+		queryList: NewQueryList(),
 	}
 }
 

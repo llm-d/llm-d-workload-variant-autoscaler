@@ -932,8 +932,9 @@ func CreateVariantAutoscalingResource(namespace, resourceName, modelId, acc stri
 		},
 		Spec: v1alpha1.VariantAutoscalingSpec{
 			ScaleTargetRef: autoscalingv1.CrossVersionObjectReference{
-				Kind: "Deployment",
-				Name: resourceName, // Use resourceName as the deployment name
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       resourceName, // Use resourceName as the deployment name
 			},
 			ModelID: modelId,
 		},

@@ -1,6 +1,6 @@
-// Package registration provides query registration functionality for the v2 collector.
+// Package registration provides query registration functionality for metrics sources.
 //
-// This file provides scale-to-zero metrics collection using the v2 collector
+// This file provides scale-to-zero metrics collection using the source
 // infrastructure with registered query templates.
 package registration
 
@@ -10,7 +10,7 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	collector "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/v2"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/logging"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils"
 )
@@ -26,23 +26,23 @@ const (
 
 // RegisterScaleToZeroQueries registers queries used for scale-to-zero decisions.
 // This should be called during initialization to register query templates with the prometheus source.
-func RegisterScaleToZeroQueries(sourceRegistry *collector.SourceRegistry) {
-	source := sourceRegistry.Get("prometheus")
-	if source == nil {
+func RegisterScaleToZeroQueries(sourceRegistry *source.SourceRegistry) {
+	metricsSource := sourceRegistry.Get("prometheus")
+	if metricsSource == nil {
 		ctrl.Log.V(logging.DEBUG).Info("Prometheus source not registered, skipping scale-to-zero query registration")
 		return
 	}
 
-	registry := source.QueryList()
+	registry := metricsSource.QueryList()
 
 	// Model request count over a retention period
 	// Uses sum(increase(...)) to get total requests over the time window
 	// The retentionPeriod parameter should be in Prometheus duration format (e.g., "10m", "1h")
-	registry.MustRegister(collector.QueryTemplate{
+	registry.MustRegister(source.QueryTemplate{
 		Name:        QueryModelRequestCount,
-		Type:        collector.QueryTypePromQL,
+		Type:        source.QueryTypePromQL,
 		Template:    `sum(increase(vllm:request_success_total{namespace="{{.namespace}}",model_name="{{.modelID}}"}[{{.retentionPeriod}}]))`,
-		Params:      []string{collector.ParamNamespace, collector.ParamModelID, ParamRetentionPeriod},
+		Params:      []string{source.ParamNamespace, source.ParamModelID, ParamRetentionPeriod},
 		Description: "Total successful requests for a model over the retention period",
 	})
 }
@@ -62,7 +62,7 @@ func RegisterScaleToZeroQueries(sourceRegistry *collector.SourceRegistry) {
 //   - error: Any error that occurred during collection
 func CollectModelRequestCount(
 	ctx context.Context,
-	source collector.MetricsSource,
+	metricsSource source.MetricsSource,
 	modelID string,
 	namespace string,
 	retentionPeriod time.Duration,
@@ -73,13 +73,13 @@ func CollectModelRequestCount(
 	retentionPeriodStr := utils.FormatPrometheusDuration(retentionPeriod)
 
 	params := map[string]string{
-		collector.ParamModelID:   modelID,
-		collector.ParamNamespace: namespace,
-		ParamRetentionPeriod:     retentionPeriodStr,
+		source.ParamModelID:   modelID,
+		source.ParamNamespace: namespace,
+		ParamRetentionPeriod:  retentionPeriodStr,
 	}
 
 	// Execute the query
-	results, err := source.Refresh(ctx, collector.RefreshSpec{
+	results, err := metricsSource.Refresh(ctx, source.RefreshSpec{
 		Queries: []string{QueryModelRequestCount},
 		Params:  params,
 	})

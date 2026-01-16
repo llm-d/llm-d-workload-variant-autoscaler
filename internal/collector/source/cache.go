@@ -1,4 +1,4 @@
-package collector
+package source
 
 import (
 	"context"
@@ -24,8 +24,8 @@ type Cache struct {
 	cleanupInterval time.Duration
 }
 
-// newCache creates a new in-memory cache
-func newCache(ctx context.Context, configuredTTL time.Duration, cleanupInterval time.Duration) *Cache {
+// NewCache creates a new in-memory cache
+func NewCache(ctx context.Context, configuredTTL time.Duration, cleanupInterval time.Duration) *Cache {
 	c := &Cache{
 		configuredTTL:   configuredTTL,
 		cleanupInterval: cleanupInterval,
@@ -42,7 +42,7 @@ func newCache(ctx context.Context, configuredTTL time.Duration, cleanupInterval 
 
 // get retrieves cached metrics by key
 // Returns the cached metrics and true if found and not expired, false otherwise
-func (c *Cache) get(key CacheKey) (*CachedValue, bool) {
+func (c *Cache) Get(key CacheKey) (*CachedValue, bool) {
 	c.mu.RLock()
 	value, ok := c.cache[key]
 	c.mu.RUnlock()
@@ -55,7 +55,7 @@ func (c *Cache) get(key CacheKey) (*CachedValue, bool) {
 }
 
 // Set stores metrics in the cache
-func (c *Cache) set(key CacheKey, data MetricResult, ttl time.Duration) {
+func (c *Cache) Set(key CacheKey, data MetricResult, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// Use configured TTL if not specified (ttl=0 means "use configured value")
