@@ -1,20 +1,4 @@
-/*
-Copyright 2025.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
-package e2esaturation
+package e2eemulated
 
 import (
 	"context"
@@ -33,12 +17,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/kubernetes"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -59,16 +37,6 @@ const (
 	queueSpareTrigger    = 2.0
 )
 
-// Kubernetes resource constants
-const (
-	controllerNamespace           = "workload-variant-autoscaler-system"
-	controllerMonitoringNamespace = "workload-variant-autoscaler-monitoring"
-	llmDNamespace                 = "llm-d-sim"
-	gatewayName                   = "infra-sim-inference-gateway-istio"
-	WVAConfigMapName              = "workload-variant-autoscaler-variantautoscaling-config"
-	saturationConfigMapName       = "workload-variant-autoscaler-saturation-scaling-config"
-)
-
 // Variant and Model constants
 const (
 	llamaModelId = "unsloth/Meta-Llama-3.1-8B"
@@ -82,47 +50,10 @@ const (
 	prometheusLocalPort = 19090
 )
 
-var (
-	k8sClient *kubernetes.Clientset
-	crClient  client.Client
-	scheme    = runtime.NewScheme()
-)
+var _ = Describe("Test workload-variant-autoscaler -HPA Mode - Single VariantAutoscaling", Ordered, func() {
+})
 
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme))
-	utilruntime.Must(promoperator.AddToScheme(scheme))
-}
-
-// initializeK8sClient initializes the Kubernetes client for testing
-func initializeK8sClient() {
-	cfg, err := func() (*rest.Config, error) {
-		if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
-			return clientcmd.BuildConfigFromFlags("", kubeconfig)
-		}
-		return rest.InClusterConfig()
-	}()
-	if err != nil {
-		Skip("failed to load kubeconfig: " + err.Error())
-	}
-
-	// Suppress warnings to avoid spam in test output
-	cfg.WarningHandler = rest.NoWarnings{}
-
-	k8sClient, err = kubernetes.NewForConfig(cfg)
-	if err != nil {
-		Skip("failed to create kubernetes client: " + err.Error())
-	}
-
-	// Initialize controller-runtime client for custom resources
-	crClient, err = client.New(cfg, client.Options{
-		Scheme: scheme,
-	})
-	if err != nil {
-		Skip("failed to create controller-runtime client: " + err.Error())
-	}
-}
-
+// This tests validates reactive emulated scaling behavior using KV cache and queue metrics.
 var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Single VariantAutoscaling", Ordered, func() {
 	var (
 		name            string
