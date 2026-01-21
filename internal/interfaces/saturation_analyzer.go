@@ -84,6 +84,7 @@ type VariantDecision struct {
 	SafetyOverride     bool        // True if saturation veto overrode model-based decision
 	LastRunTime        metav1.Time // Time when decision was made (for status updates)
 	SaturationOnly     bool        // True if operating in saturation-only mode (no model-based analysis)
+	GPUsPerReplica     int         // Number of GPUs per replica for this variant (from Deployment spec)
 
 	// CurrentAllocation carries the collected metrics/allocation state
 	// This helps the Controller update status without re-collecting metrics
@@ -118,6 +119,7 @@ type VariantReplicaState struct {
 	// WVA uses this to prevent cascade scaling - avoiding new scale-up requests
 	// while pending pods are still becoming ready.
 	PendingReplicas int
+	GPUsPerReplica  int // Number of GPUs per replica for this variant (from Deployment spec)
 }
 
 // SaturationAnalyzer analyzes replica saturation metrics and recommends scaling decisions

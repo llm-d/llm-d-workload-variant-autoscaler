@@ -137,6 +137,13 @@ func (s *Server) AllAllocations() map[string]*Allocation {
 	return s.allAllocations
 }
 
+func (s *Server) SetAllAllocations(allAllocationsData []*config.AllocationData) {
+	s.allAllocations = make(map[string]*Allocation)
+	for _, data := range allAllocationsData {
+		s.allAllocations[data.Accelerator] = AllocationFromData(data)
+	}
+}
+
 func (s *Server) Spec() *config.ServerSpec {
 	return s.spec
 }

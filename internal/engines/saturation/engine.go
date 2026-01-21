@@ -39,6 +39,7 @@ import (
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/common"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/executor"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/limiter"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/logging"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/saturation"
@@ -149,8 +150,9 @@ func (e *Engine) optimize(ctx context.Context) error {
 	}
 
 	// Collected accelerator inventory (only in limited mode)
+	inventory := map[string]map[string]collector.AcceleratorModelInfo{}
 	if strings.EqualFold(os.Getenv("WVA_LIMITED_MODE"), "true") {
-		inventory, err := collector.CollectInventoryK8S(ctx, e.client)
+		inventory, err = collector.CollectInventoryK8S(ctx, e.client)
 		if err != nil {
 			logger.Error(err, "Failed to collect cluster inventory")
 			// do not proceed to optimization if inventory collection fails in limited mode
@@ -254,6 +256,17 @@ func (e *Engine) optimize(ctx context.Context) error {
 		}
 	}
 
+	// apply limited mode saturation decisions
+	if strings.EqualFold(os.Getenv("WVA_LIMITED_MODE"), "true") {
+		limiter, err := limiter.NewLimiter(limiter.TargetStrategy)
+		if err != nil {
+			return err
+		}
+		if err = limiter.Allocate(ctx, allDecisions, inventory); err != nil {
+			return err
+		}
+	}
+
 	// STEP 3: Apply decisions and update VA status
 	// Always call applySaturationDecisions, even with empty decisions.
 	// This function also updates VA.Status.CurrentAlloc with collected metrics
@@ -331,13 +344,27 @@ func (e *Engine) BuildVariantStates(
 			pendingReplicas = 0
 		}
 
-		ctrl.LoggerFrom(ctx).V(1).Info("BuildVariantStates result", "variant", va.Name, "currentReplicas", currentReplicas, "readyReplicas", readyReplicas, "pendingReplicas", pendingReplicas)
+		// get number of GPUs per replica
+		gpusPerReplica := 0
+		if deploy.Spec.Template.Spec.Containers != nil {
+			for _, container := range deploy.Spec.Template.Spec.Containers {
+				if container.Resources.Requests != nil {
+					if gpu, exists := container.Resources.Requests["nvidia.com/gpu"]; exists {
+						gpusPerReplica += int(gpu.MilliValue())
+					}
+				}
+			}
+		}
+
+		ctrl.LoggerFrom(ctx).V(1).Info("BuildVariantStates result", "variant", va.Name, "currentReplicas", currentReplicas, "readyReplicas",
+			readyReplicas, "pendingReplicas", pendingReplicas, "gpusPerReplica", gpusPerReplica)
 
 		states = append(states, interfaces.VariantReplicaState{
 			VariantName:     deploy.Name,
 			CurrentReplicas: currentReplicas,
 			DesiredReplicas: va.Status.DesiredOptimizedAlloc.NumReplicas,
 			PendingReplicas: pendingReplicas,
+			GPUsPerReplica:  gpusPerReplica,
 		})
 	}
 
@@ -394,6 +421,7 @@ func (e *Engine) convertSaturationTargetsToDecisions(
 			ModelBasedDecision: false,
 			SafetyOverride:     false,
 			Reason:             "saturation-only mode: " + string(action),
+			GPUsPerReplica:     state.GPUsPerReplica,
 		}
 
 		if va != nil {
@@ -565,11 +593,13 @@ func (e *Engine) applySaturationDecisions(
 		var targetReplicas int
 		var acceleratorName string
 		var reason string
+		var gpusPerReplica int
 
 		if hasDecision {
 			targetReplicas = decision.TargetReplicas
 			acceleratorName = decision.AcceleratorName
 			reason = decision.Reason
+			gpusPerReplica = decision.GPUsPerReplica
 		} else {
 			// No change/decision: Keep current target or default to current replicas
 			// We effectively explicitly "decide" to keep things as they are if no decision was made
@@ -707,6 +737,8 @@ func (e *Engine) applySaturationDecisions(
 			MetricsAvailable:  metricsAvailable,
 			MetricsReason:     metricsReason,
 			MetricsMessage:    metricsMessage,
+			// Pass other fields if needed, but these are crucial for Status
+			GPUsPerReplica: gpusPerReplica,
 		})
 
 		// 2. Trigger Reconciler
