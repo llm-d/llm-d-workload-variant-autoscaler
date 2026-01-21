@@ -1,0 +1,76 @@
+{{- if .Values.controller.enabled }}
+apiVersion: v1
+kind: ConfigMap
+# This ConfigMap defines unified model scaling configuration combining:
+# - Saturation-based scaling thresholds (kvCacheThreshold, queueLengthThreshold, etc.)
+# - Scale-to-zero settings (enableScaleToZero, scaleToZeroRetentionPeriod)
+#
+# Configuration structure:
+# - 'default' entry: Global defaults applied to all models
+# - Override entries: Per-model configuration (must include model_id)
+#
+# Threshold definitions:
+# - kvCacheThreshold: Replica saturated if KV cache utilization >= threshold (0.0-1.0)
+# - queueLengthThreshold: Replica saturated if queue length >= threshold (integer)
+# - kvSpareTrigger: Scale-up signal if avg spare KV capacity < trigger (0.0-1.0)
+# - queueSpareTrigger: Scale-up signal if avg spare queue capacity < trigger (integer)
+# - enableScaleToZero: Allow scaling to zero replicas when idle (true/false)
+# - scaleToZeroRetentionPeriod: Time to wait before scaling to zero (e.g., "5m", "10m")
+#
+metadata:
+  name: {{ include "workload-variant-autoscaler.fullname" . }}-model-scaling-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "workload-variant-autoscaler.labels" . | nindent 4 }}
+data:
+  # Global defaults applied to all models unless overridden
+  default: |
+    kvCacheThreshold: {{ .Values.wva.modelScaling.default.kvCacheThreshold }}
+    queueLengthThreshold: {{ .Values.wva.modelScaling.default.queueLengthThreshold }}
+    kvSpareTrigger: {{ .Values.wva.modelScaling.default.kvSpareTrigger }}
+    queueSpareTrigger: {{ .Values.wva.modelScaling.default.queueSpareTrigger }}
+{{- if .Values.wva.modelScaling.default.enableScaleToZero }}
+    enableScaleToZero: {{ .Values.wva.modelScaling.default.enableScaleToZero }}
+{{- end }}
+{{- if .Values.wva.modelScaling.default.scaleToZeroRetentionPeriod }}
+    scaleToZeroRetentionPeriod: {{ .Values.wva.modelScaling.default.scaleToZeroRetentionPeriod | quote }}
+{{- end }}
+{{- if .Values.wva.modelScaling.overrides }}
+{{- range $name, $override := .Values.wva.modelScaling.overrides }}
+  {{ $name }}: |
+    model_id: {{ $override.modelID | quote }}
+{{- if $override.namespace }}
+    namespace: {{ $override.namespace | quote }}
+{{- end }}
+{{- if $override.kvCacheThreshold }}
+    kvCacheThreshold: {{ $override.kvCacheThreshold }}
+{{- end }}
+{{- if $override.queueLengthThreshold }}
+    queueLengthThreshold: {{ $override.queueLengthThreshold }}
+{{- end }}
+{{- if $override.kvSpareTrigger }}
+    kvSpareTrigger: {{ $override.kvSpareTrigger }}
+{{- end }}
+{{- if $override.queueSpareTrigger }}
+    queueSpareTrigger: {{ $override.queueSpareTrigger }}
+{{- end }}
+{{- if $override.enableScaleToZero }}
+    enableScaleToZero: {{ $override.enableScaleToZero }}
+{{- end }}
+{{- if $override.scaleToZeroRetentionPeriod }}
+    scaleToZeroRetentionPeriod: {{ $override.scaleToZeroRetentionPeriod | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+  # Example per-model override with all options
+  # granite-override: |
+  #   model_id: ibm/granite-13b
+  #   namespace: lab-namespace
+  #   kvCacheThreshold: 0.75
+  #   queueLengthThreshold: 10
+  #   kvSpareTrigger: 0.15
+  #   queueSpareTrigger: 5
+  #   enableScaleToZero: true
+  #   scaleToZeroRetentionPeriod: "10m"
+{{- end }}

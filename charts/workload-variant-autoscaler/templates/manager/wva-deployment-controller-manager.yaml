@@ -68,8 +68,8 @@ spec:
             value: {{ if .Values.wva.logging }}{{ .Values.wva.logging.level | default "info" | quote }}{{ else }}"info"{{ end }}
           - name: CONFIG_MAP_NAME
             value: {{ include "workload-variant-autoscaler.fullname" . }}-variantautoscaling-config
-          - name: SATURATION_CONFIG_MAP_NAME
-            value: {{ include "workload-variant-autoscaler.fullname" . }}-saturation-scaling-config
+          - name: MODEL_SCALING_CONFIG_MAP_NAME
+            value: {{ include "workload-variant-autoscaler.fullname" . }}-model-scaling-config
           - name: PROMETHEUS_BASE_URL
             valueFrom:
               configMapKeyRef:

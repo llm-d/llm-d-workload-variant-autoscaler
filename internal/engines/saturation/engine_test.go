@@ -395,8 +395,8 @@ data:
 			engine := NewEngine(k8sClient, k8sClient.Scheme(), nil, sourceRegistry)
 
 			// Populate global config
-			common.Config.UpdateSaturationConfig(map[string]interfaces.SaturationScalingConfig{
-				"default": {},
+			common.Config.UpdateModelScalingConfig(config.ModelScalingConfigData{
+				"default": {KvCacheThreshold: 0.8, QueueLengthThreshold: 5, KvSpareTrigger: 0.1, QueueSpareTrigger: 3},
 			})
 
 			By("Performing optimization loop")
@@ -635,8 +635,8 @@ data:
 			engine := NewEngine(k8sClient, k8sClient.Scheme(), nil, sourceRegistry)
 
 			// Populate global config
-			common.Config.UpdateSaturationConfig(map[string]interfaces.SaturationScalingConfig{
-				"default": {},
+			common.Config.UpdateModelScalingConfig(config.ModelScalingConfigData{
+				"default": {KvCacheThreshold: 0.8, QueueLengthThreshold: 5, KvSpareTrigger: 0.1, QueueSpareTrigger: 3},
 			})
 
 			By("Performing optimization loop with source infrastructure")

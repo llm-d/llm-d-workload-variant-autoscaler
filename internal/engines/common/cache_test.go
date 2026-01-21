@@ -4,7 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	interfaces "github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/config"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
 )
 
 func TestInternalDecisionCache(t *testing.T) {
@@ -50,20 +51,20 @@ func TestInternalDecisionCache(t *testing.T) {
 }
 
 func TestGlobalConfig(t *testing.T) {
-	config := &GlobalConfig{}
+	globalConfig := &GlobalConfig{}
 
 	// Test Optimization Config
-	config.UpdateOptimizationConfig("60s")
-	if config.GetOptimizationInterval() != "60s" {
-		t.Errorf("Expected interval '60s', got '%s'", config.GetOptimizationInterval())
+	globalConfig.UpdateOptimizationConfig("60s")
+	if globalConfig.GetOptimizationInterval() != "60s" {
+		t.Errorf("Expected interval '60s', got '%s'", globalConfig.GetOptimizationInterval())
 	}
 
-	// Test Saturation Config
-	satConfig := map[string]interfaces.SaturationScalingConfig{
+	// Test Model Scaling Config
+	modelScalingConfig := config.ModelScalingConfigData{
 		"default": {KvCacheThreshold: 0.8},
 	}
-	config.UpdateSaturationConfig(satConfig)
-	retrievedConfig := config.GetSaturationConfig()
+	globalConfig.UpdateModelScalingConfig(modelScalingConfig)
+	retrievedConfig := globalConfig.GetModelScalingConfig()
 	if retrievedConfig["default"].KvCacheThreshold != 0.8 {
 		t.Errorf("Expected threshold 0.8, got %f", retrievedConfig["default"].KvCacheThreshold)
 	}
@@ -74,8 +75,8 @@ func TestGlobalConfig(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			config.UpdateOptimizationConfig("30s")
-			config.GetOptimizationInterval()
+			globalConfig.UpdateOptimizationConfig("30s")
+			globalConfig.GetOptimizationInterval()
 		}()
 	}
 	wg.Wait()

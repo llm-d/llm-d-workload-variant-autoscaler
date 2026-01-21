@@ -47,24 +47,29 @@ wva:
   # Useful for parallel e2e tests where multiple WVA controllers run simultaneously
   controllerInstance: ""
 
-  # Saturation-based scaling configuration
-  # These thresholds determine when replicas are saturated and when to scale up
-  capacityScaling:
-    # Global defaults applied to all variants unless overridden
+  # Unified model scaling configuration (saturation thresholds + scale-to-zero settings)
+  modelScaling:
+    # Global defaults applied to all models unless overridden
     default:
+      # Saturation-based scaling thresholds
       kvCacheThreshold: 0.80      # Replica saturated if KV cache utilization >= threshold (0.0-1.0)
       queueLengthThreshold: 5     # Replica saturated if queue length >= threshold
       kvSpareTrigger: 0.1         # Scale-up if avg spare KV capacity < trigger (0.0-1.0)
       queueSpareTrigger: 3        # Scale-up if avg spare queue capacity < trigger
-    
-    # Per-model/namespace overrides (optional)
+      # Scale-to-zero settings (optional)
+      # enableScaleToZero: false  # Allow scaling to zero replicas when idle
+      # scaleToZeroRetentionPeriod: "10m"    # Time to wait before scaling to zero
+
+    # Per-model overrides (optional)
     # Example:
     # overrides:
-    #   llm-d:
-    #     modelID: "Qwen/Qwen3-0.6B"
-    #     namespace: "llm-d-autoscaler"
-    #     kvCacheThreshold: 0.70
-    #     kvSpareTrigger: 0.35
+    #   granite-model:
+    #     modelID: "ibm/granite-13b"
+    #     namespace: "production"
+    #     kvCacheThreshold: 0.75
+    #     kvSpareTrigger: 0.15
+    #     enableScaleToZero: true
+    #     scaleToZeroRetentionPeriod: "5m"
     overrides: {}
 
 llmd:
