@@ -40,9 +40,8 @@ import (
 
 // Scale-to-zero test constants
 const (
-	scaleToZeroConfigMapName = "model-scale-to-zero-config"
-	// retentionPeriodShort is a short retention period for testing scale-to-zero
-	retentionPeriodShort = "2m"
+	// scaleToZeroRetentionPeriodShort is a short retention period for testing scale-to-zero
+	scaleToZeroRetentionPeriodShort = "2m"
 )
 
 // This test follows the same pattern as the saturation test (Single VariantAutoscaling)
@@ -86,33 +85,32 @@ var _ = Describe("Test workload-variant-autoscaler - Scale-to-Zero Feature", Ord
 
 		logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
-		By("verifying saturation-scaling ConfigMap exists before creating VA")
+		By("verifying model-scaling ConfigMap exists and updating with scale-to-zero settings")
 		Eventually(func(g Gomega) {
-			cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, saturationConfigMapName, metav1.GetOptions{})
-			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("saturation ConfigMap %s should exist in namespace %s", saturationConfigMapName, controllerNamespace))
-			g.Expect(cm.Data).To(HaveKey("default"), "saturation ConfigMap should have 'default' configuration")
+			cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, modelScalingConfigName, metav1.GetOptions{})
+			g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("model-scaling ConfigMap %s should exist in namespace %s", modelScalingConfigName, controllerNamespace))
+			g.Expect(cm.Data).To(HaveKey("default"), "model-scaling ConfigMap should have 'default' configuration")
 		}, 2*time.Minute, 5*time.Second).Should(Succeed())
 
-		By("creating scale-to-zero ConfigMap with feature enabled")
-		scaleToZeroCM := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      scaleToZeroConfigMapName,
-				Namespace: controllerNamespace,
-			},
-			Data: map[string]string{
-				"default": fmt.Sprintf(`enable_scale_to_zero: true
-retention_period: %s`, retentionPeriodShort),
-				"test-model-override": fmt.Sprintf(`model_id: %s
-enable_scale_to_zero: true
-retention_period: %s`, modelName, retentionPeriodShort),
-			},
-		}
+		By("updating model-scaling ConfigMap with scale-to-zero enabled")
+		cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, modelScalingConfigName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
 
-		// Delete existing ConfigMap if it exists
-		_ = k8sClient.CoreV1().ConfigMaps(controllerNamespace).Delete(ctx, scaleToZeroConfigMapName, metav1.DeleteOptions{})
+		// Update the default config to enable scale-to-zero with the unified format
+		cm.Data["default"] = fmt.Sprintf(`kvCacheThreshold: 0.80
+queueLengthThreshold: 5
+kvSpareTrigger: 0.1
+queueSpareTrigger: 3
+enableScaleToZero: true
+scaleToZeroRetentionPeriod: %s`, scaleToZeroRetentionPeriodShort)
 
-		_, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Create(ctx, scaleToZeroCM, metav1.CreateOptions{})
-		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to create scale-to-zero ConfigMap: %s", scaleToZeroConfigMapName))
+		// Add model-specific override
+		cm.Data["test-model-override"] = fmt.Sprintf(`model_id: %s
+enableScaleToZero: true
+scaleToZeroRetentionPeriod: %s`, modelName, scaleToZeroRetentionPeriodShort)
+
+		_, err = k8sClient.CoreV1().ConfigMaps(controllerNamespace).Update(ctx, cm, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to update model-scaling ConfigMap: %s", modelScalingConfigName))
 
 		By("ensuring unique app label for deployment and service")
 		utils.ValidateAppLabelUniqueness(namespace, appLabel, k8sClient, crClient)
@@ -156,12 +154,12 @@ retention_period: %s`, modelName, retentionPeriodShort),
 	})
 
 
-	// ConfigMap and VA existence checks - same as saturation test + scale-to-zero ConfigMap check
+	// ConfigMap and VA existence checks - verify unified model-scaling config
 	Context("ConfigMap and VA existence checks", func() {
-		It("should have saturation-scaling ConfigMap with default configuration spawned", func() {
+		It("should have model-scaling ConfigMap with default configuration and scale-to-zero enabled", func() {
 			By("verifying ConfigMap exists with expected structure")
-			cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, saturationConfigMapName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("ConfigMap %s should exist", saturationConfigMapName))
+			cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, modelScalingConfigName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("ConfigMap %s should exist", modelScalingConfigName))
 
 			By("verifying default configuration exists")
 			Expect(cm.Data).To(HaveKey("default"), "ConfigMap should contain 'default' key")
@@ -169,18 +167,10 @@ retention_period: %s`, modelName, retentionPeriodShort),
 			defaultConfig := cm.Data["default"]
 			Expect(defaultConfig).To(ContainSubstring("kvCacheThreshold"), "Default config should contain kvCacheThreshold")
 			Expect(defaultConfig).To(ContainSubstring("queueLengthThreshold"), "Default config should contain queueLengthThreshold")
+			Expect(defaultConfig).To(ContainSubstring("enableScaleToZero: true"), "Default config should enable scale-to-zero")
+			Expect(defaultConfig).To(ContainSubstring("scaleToZeroRetentionPeriod"), "Default config should have retention period")
 
-			_, _ = fmt.Fprintf(GinkgoWriter, "ConfigMap %s verified with default configuration\n", saturationConfigMapName)
-		})
-
-		It("should have scale-to-zero ConfigMap created", func() {
-			By("verifying scale-to-zero ConfigMap exists")
-			cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, scaleToZeroConfigMapName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("ConfigMap %s should exist", scaleToZeroConfigMapName))
-			Expect(cm.Data).To(HaveKey("default"), "ConfigMap should contain 'default' key")
-			Expect(cm.Data["default"]).To(ContainSubstring("enable_scale_to_zero: true"), "Default config should enable scale-to-zero")
-
-			_, _ = fmt.Fprintf(GinkgoWriter, "Scale-to-zero ConfigMap verified\n")
+			_, _ = fmt.Fprintf(GinkgoWriter, "ConfigMap %s verified with unified scaling configuration\n", modelScalingConfigName)
 		})
 
 		It("should have VariantAutoscaling resource created", func() {
@@ -367,7 +357,7 @@ retention_period: %s`, modelName, retentionPeriodShort),
 			Expect(hpa.Spec.MinReplicas).NotTo(BeNil())
 			Expect(*hpa.Spec.MinReplicas).To(Equal(int32(0)), "HPA minReplicas should now be 0")
 
-			_, _ = fmt.Fprintf(GinkgoWriter, "HPA updated to minReplicas=0. Now waiting for scale-to-zero (retention period: %s)...\n", retentionPeriodShort)
+			_, _ = fmt.Fprintf(GinkgoWriter, "HPA updated to minReplicas=0. Now waiting for scale-to-zero (retention period: %s)...\n", scaleToZeroRetentionPeriodShort)
 
 			By("waiting for VA DesiredOptimizedAlloc to show 0 replicas")
 			Eventually(func(g Gomega) {
@@ -454,13 +444,13 @@ retention_period: %s`, modelName, retentionPeriodShort),
 			// 1. When there's recent traffic, scale-to-zero doesn't happen
 			// 2. The controller waits for the retention period before scaling down
 
-			By("verifying scale-to-zero ConfigMap has retention period configured")
-			cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, scaleToZeroConfigMapName, metav1.GetOptions{})
+			By("verifying model-scaling ConfigMap has retention period configured")
+			cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, modelScalingConfigName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(cm.Data["default"]).To(ContainSubstring("retention_period"),
-				"ConfigMap should have retention_period configured")
+			Expect(cm.Data["default"]).To(ContainSubstring("scaleToZeroRetentionPeriod"),
+				"ConfigMap should have scaleToZeroRetentionPeriod configured")
 
-			_, _ = fmt.Fprintf(GinkgoWriter, "Retention period is configured in ConfigMap: %s\n", retentionPeriodShort)
+			_, _ = fmt.Fprintf(GinkgoWriter, "Retention period is configured in ConfigMap: %s\n", scaleToZeroRetentionPeriodShort)
 
 			// The retention period test is implicitly validated by the scale-to-zero test above:
 			// - Load was stopped at the end of "Scale-up under load" context
@@ -510,9 +500,19 @@ retention_period: %s`, modelName, retentionPeriodShort),
 		err = k8sClient.AppsV1().Deployments(namespace).Delete(ctx, deployName, metav1.DeleteOptions{})
 		Expect(client.IgnoreNotFound(err)).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to delete Deployment: %s", deployName))
 
-		// Delete scale-to-zero ConfigMap
-		err = k8sClient.CoreV1().ConfigMaps(controllerNamespace).Delete(ctx, scaleToZeroConfigMapName, metav1.DeleteOptions{})
-		Expect(client.IgnoreNotFound(err)).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to delete ConfigMap: %s", scaleToZeroConfigMapName))
+		// Restore model-scaling ConfigMap to default (without scale-to-zero override)
+		By("restoring model-scaling ConfigMap to default state")
+		cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, modelScalingConfigName, metav1.GetOptions{})
+		if err == nil {
+			// Remove the test-model-override entry we added
+			delete(cm.Data, "test-model-override")
+			// Restore default to disable scale-to-zero
+			cm.Data["default"] = `kvCacheThreshold: 0.80
+queueLengthThreshold: 5
+kvSpareTrigger: 0.1
+queueSpareTrigger: 3`
+			_, _ = k8sClient.CoreV1().ConfigMaps(controllerNamespace).Update(ctx, cm, metav1.UpdateOptions{})
+		}
 
 		_, _ = fmt.Fprintf(GinkgoWriter, "Cleanup completed for scale-to-zero test\n")
 	})
@@ -558,32 +558,30 @@ var _ = Describe("Test workload-variant-autoscaler - Scale-to-Zero Disabled", Or
 
 		logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
-		By("verifying saturation-scaling ConfigMap exists")
+		By("verifying model-scaling ConfigMap exists and updating with scale-to-zero DISABLED")
 		Eventually(func(g Gomega) {
-			cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, saturationConfigMapName, metav1.GetOptions{})
+			cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, modelScalingConfigName, metav1.GetOptions{})
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(cm.Data).To(HaveKey("default"))
 		}, 2*time.Minute, 5*time.Second).Should(Succeed())
 
-		By("creating scale-to-zero ConfigMap with feature DISABLED")
-		scaleToZeroCM := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      scaleToZeroConfigMapName,
-				Namespace: controllerNamespace,
-			},
-			Data: map[string]string{
-				"default": `enable_scale_to_zero: false`,
-				"test-model-dis": fmt.Sprintf(`model_id: %s
-enable_scale_to_zero: false`, modelName),
-			},
-		}
+		By("updating model-scaling ConfigMap with scale-to-zero DISABLED")
+		cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, modelScalingConfigName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
 
-		// Delete and recreate ConfigMap
-		_ = k8sClient.CoreV1().ConfigMaps(controllerNamespace).Delete(ctx, scaleToZeroConfigMapName, metav1.DeleteOptions{})
-		time.Sleep(1 * time.Second) // Brief pause for deletion to propagate
+		// Update default config with scale-to-zero explicitly disabled
+		cm.Data["default"] = `kvCacheThreshold: 0.80
+queueLengthThreshold: 5
+kvSpareTrigger: 0.1
+queueSpareTrigger: 3
+enableScaleToZero: false`
 
-		_, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Create(ctx, scaleToZeroCM, metav1.CreateOptions{})
-		Expect(err).NotTo(HaveOccurred(), "Should be able to create scale-to-zero ConfigMap with disabled setting")
+		// Add model-specific override with scale-to-zero disabled
+		cm.Data["test-model-dis"] = fmt.Sprintf(`model_id: %s
+enableScaleToZero: false`, modelName)
+
+		_, err = k8sClient.CoreV1().ConfigMaps(controllerNamespace).Update(ctx, cm, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred(), "Should be able to update model-scaling ConfigMap with scale-to-zero disabled")
 
 		By("ensuring unique app label for deployment and service")
 		utils.ValidateAppLabelUniqueness(namespace, appLabel, k8sClient, crClient)
@@ -639,9 +637,9 @@ enable_scale_to_zero: false`, modelName),
 
 	Context("Scale-to-zero disabled behavior", func() {
 		It("should verify scale-to-zero is disabled in ConfigMap", func() {
-			cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, scaleToZeroConfigMapName, metav1.GetOptions{})
+			cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, modelScalingConfigName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(cm.Data["default"]).To(ContainSubstring("enable_scale_to_zero: false"),
+			Expect(cm.Data["default"]).To(ContainSubstring("enableScaleToZero: false"),
 				"ConfigMap should have scale-to-zero disabled")
 			_, _ = fmt.Fprintf(GinkgoWriter, "Verified scale-to-zero is DISABLED in ConfigMap\n")
 		})
@@ -766,6 +764,18 @@ enable_scale_to_zero: false`, modelName),
 
 		_ = k8sClient.CoreV1().Services(namespace).Delete(ctx, serviceName, metav1.DeleteOptions{})
 		_ = k8sClient.AppsV1().Deployments(namespace).Delete(ctx, deployName, metav1.DeleteOptions{})
+
+		// Restore model-scaling ConfigMap to default (remove test-model-dis entry)
+		By("restoring model-scaling ConfigMap to default state")
+		cm, err := k8sClient.CoreV1().ConfigMaps(controllerNamespace).Get(ctx, modelScalingConfigName, metav1.GetOptions{})
+		if err == nil {
+			delete(cm.Data, "test-model-dis")
+			cm.Data["default"] = `kvCacheThreshold: 0.80
+queueLengthThreshold: 5
+kvSpareTrigger: 0.1
+queueSpareTrigger: 3`
+			_, _ = k8sClient.CoreV1().ConfigMaps(controllerNamespace).Update(ctx, cm, metav1.UpdateOptions{})
+		}
 
 		_, _ = fmt.Fprintf(GinkgoWriter, "Cleanup completed for scale-to-zero disabled test\n")
 	})
