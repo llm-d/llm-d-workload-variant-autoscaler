@@ -1138,37 +1138,18 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 			ctx = context.Background()
 
 			// Discover existing EPP pods by finding services with "-epp" suffix
-			// Prefer the primary EPP (gaie-sim-epp) over secondary EPPs (gaie-sim-2-epp)
 			By("discovering existing EPP service")
 			serviceList, err := k8sClient.CoreV1().Services(testNamespace).List(ctx, metav1.ListOptions{})
 			Expect(err).NotTo(HaveOccurred(), "Should be able to list services")
 
-			// Collect all EPP services and prefer primary (no numeric suffix before -epp)
-			var primaryEPP, fallbackEPP string
+			// Find first EPP service (service name ends with "-epp")
 			for _, svc := range serviceList.Items {
 				if len(svc.Name) > 4 && svc.Name[len(svc.Name)-4:] == "-epp" {
-					poolName := svc.Name[:len(svc.Name)-4]
-					// Check if this is the primary EPP (gaie-sim-epp) vs secondary (gaie-sim-2-epp)
-					// Primary EPP doesn't have a digit before "-epp"
-					if len(poolName) > 0 && poolName[len(poolName)-1] >= '0' && poolName[len(poolName)-1] <= '9' {
-						// This is a secondary EPP (ends with digit like gaie-sim-2)
-						if fallbackEPP == "" {
-							fallbackEPP = poolName
-						}
-					} else {
-						// This is the primary EPP
-						primaryEPP = poolName
-					}
-					_, _ = fmt.Fprintf(GinkgoWriter, "Found EPP service: %s, InferencePool: %s\n", svc.Name, poolName)
+					// Extract InferencePool name from service name (remove "-epp" suffix)
+					testInferencePoolName = svc.Name[:len(svc.Name)-4]
+					_, _ = fmt.Fprintf(GinkgoWriter, "Found EPP service: %s, InferencePool: %s\n", svc.Name, testInferencePoolName)
+					break
 				}
-			}
-			// Use primary EPP if available, otherwise use fallback
-			if primaryEPP != "" {
-				testInferencePoolName = primaryEPP
-				_, _ = fmt.Fprintf(GinkgoWriter, "Using primary EPP: %s-epp\n", testInferencePoolName)
-			} else if fallbackEPP != "" {
-				testInferencePoolName = fallbackEPP
-				_, _ = fmt.Fprintf(GinkgoWriter, "Using fallback EPP: %s-epp\n", testInferencePoolName)
 			}
 
 			if testInferencePoolName == "" {

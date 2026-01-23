@@ -23,11 +23,6 @@ type SaturationScalingConfig struct {
 
 	// QueueSpareTrigger: Scale-up if average spare queue capacity < this value
 	QueueSpareTrigger float64 `yaml:"queueSpareTrigger"`
-
-	// EnableLimiter: When true, includes the GPU limiter in the scaling pipeline
-	// to constrain scaling decisions based on available cluster resources.
-	// Default is false (limiter disabled).
-	EnableLimiter bool `yaml:"enableLimiter,omitempty"`
 }
 
 // Validate checks for invalid threshold values.

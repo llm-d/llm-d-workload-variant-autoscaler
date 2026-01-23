@@ -25,7 +25,6 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
@@ -38,7 +37,6 @@ import (
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/registration"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/discovery"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/common"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/executor"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/pipeline"
@@ -68,10 +66,6 @@ type Engine struct {
 
 	// ScaleToZeroEnforcer applies scale-to-zero and minimum replica enforcement
 	ScaleToZeroEnforcer *pipeline.Enforcer
-
-	// GPULimiter constrains scaling decisions based on available GPU resources.
-	// Only applied when EnableLimiter is true in the saturation config.
-	GPULimiter pipeline.Limiter
 }
 
 // getVariantKey returns a unique key for a variant combining namespace and name.
@@ -89,19 +83,12 @@ func NewEngine(client client.Client, scheme *runtime.Scheme, recorder record.Eve
 		return registration.CollectModelRequestCount(ctx, promSource, modelID, namespace, retentionPeriod)
 	}
 
-	// Create GPU limiter with TypeInventory and GreedyBySaturation algorithm
-	gpuDiscovery := discovery.NewK8sWithGpuOperator(client)
-	gpuInventory := pipeline.NewTypeInventoryWithUsage("cluster-gpu-inventory", gpuDiscovery)
-	gpuAlgorithm := pipeline.NewGreedyBySaturation()
-	gpuLimiter := pipeline.NewDefaultLimiter("gpu-limiter", gpuInventory, gpuAlgorithm)
-
 	engine := Engine{
 		client:                  client,
 		scheme:                  scheme,
 		Recorder:                recorder,
 		ReplicaMetricsCollector: collector.NewReplicaMetricsCollector(promSource, client),
 		ScaleToZeroEnforcer:     pipeline.NewEnforcer(requestCountFunc),
-		GPULimiter:              gpuLimiter,
 	}
 
 	engine.executor = executor.NewPollingExecutor(executor.PollingConfig{
@@ -267,35 +254,6 @@ func (e *Engine) optimize(ctx context.Context) error {
 		}
 	}
 
-	// STEP 2.5: Apply GPU limiter if enabled
-	// This constrains scaling decisions based on available GPU resources
-	if saturationConfig.EnableLimiter && len(allDecisions) > 0 {
-		logger.Info("Applying GPU limiter to scaling decisions",
-			"decisionCount", len(allDecisions))
-
-		// Convert to pointer slice for limiter interface
-		decisionPtrs := make([]*interfaces.VariantDecision, len(allDecisions))
-		for i := range allDecisions {
-			decisionPtrs[i] = &allDecisions[i]
-		}
-
-		if err := e.GPULimiter.Limit(ctx, decisionPtrs); err != nil {
-			logger.Error(err, "GPU limiter failed, proceeding with original decisions")
-			// Continue with original decisions on limiter failure
-		} else {
-			// Log any decisions that were limited
-			for _, d := range decisionPtrs {
-				if d.WasLimited {
-					logger.Info("Decision was limited by GPU availability",
-						"variant", d.VariantName,
-						"originalTarget", d.OriginalTargetReplicas,
-						"limitedTarget", d.TargetReplicas,
-						"limitedBy", d.LimitedBy)
-				}
-			}
-		}
-	}
-
 	// STEP 3: Apply decisions and update VA status
 	// Always call applySaturationDecisions, even with empty decisions.
 	// This function also updates VA.Status.CurrentAlloc with collected metrics
@@ -373,50 +331,17 @@ func (e *Engine) BuildVariantStates(
 			pendingReplicas = 0
 		}
 
-		// Extract GPUs per replica from deployment's pod template
-		gpusPerReplica := getDeploymentGPUsPerReplica(deploy)
-
-		ctrl.LoggerFrom(ctx).V(1).Info("BuildVariantStates result", "variant", va.Name, "currentReplicas", currentReplicas, "readyReplicas", readyReplicas, "pendingReplicas", pendingReplicas, "gpusPerReplica", gpusPerReplica)
+		ctrl.LoggerFrom(ctx).V(1).Info("BuildVariantStates result", "variant", va.Name, "currentReplicas", currentReplicas, "readyReplicas", readyReplicas, "pendingReplicas", pendingReplicas)
 
 		states = append(states, interfaces.VariantReplicaState{
 			VariantName:     deploy.Name,
 			CurrentReplicas: currentReplicas,
 			DesiredReplicas: va.Status.DesiredOptimizedAlloc.NumReplicas,
 			PendingReplicas: pendingReplicas,
-			GPUsPerReplica:  gpusPerReplica,
 		})
 	}
 
 	return states
-}
-
-// gpuVendors lists the resource name prefixes for GPU vendors
-var gpuVendors = []string{"nvidia.com", "amd.com", "intel.com"}
-
-// getDeploymentGPUsPerReplica extracts the total GPU requests from a deployment's pod template.
-// It sums GPU requests across all containers for supported vendors (nvidia.com, amd.com, intel.com).
-// Returns 1 as default if no GPU requests are found (assumes at least 1 GPU for inference workloads).
-func getDeploymentGPUsPerReplica(deploy *appsv1.Deployment) int {
-	if deploy == nil {
-		return 1
-	}
-
-	total := 0
-	for _, container := range deploy.Spec.Template.Spec.Containers {
-		for _, vendor := range gpuVendors {
-			resName := corev1.ResourceName(vendor + "/gpu")
-			if qty, ok := container.Resources.Requests[resName]; ok {
-				total += int(qty.Value())
-			}
-		}
-	}
-
-	// Default to 1 GPU if no explicit requests found
-	// (common for inference workloads that may not have resource requests)
-	if total == 0 {
-		return 1
-	}
-	return total
 }
 
 // convertSaturationTargetsToDecisions converts saturation-only targets to VariantDecisions.
@@ -456,34 +381,24 @@ func (e *Engine) convertSaturationTargetsToDecisions(
 			action = interfaces.ActionNoChange
 		}
 
-		// Use GPUsPerReplica from variant state (extracted from deployment)
-		gpusPerReplica := state.GPUsPerReplica
-		if gpusPerReplica <= 0 {
-			gpusPerReplica = 1 // Fallback default
-		}
-
 		decision := interfaces.VariantDecision{
-			VariantName:            variantName,
-			Namespace:              saturationAnalysis.Namespace,
-			ModelID:                saturationAnalysis.ModelID,
-			CurrentReplicas:        state.CurrentReplicas,
-			TargetReplicas:         targetReplicas,
-			OriginalTargetReplicas: targetReplicas, // Store original before limiter modifies it
-			DesiredReplicas:        state.DesiredReplicas,
-			Action:                 action,
-			SaturationBased:        true,
-			SaturationOnly:         true,
-			ModelBasedDecision:     false,
-			SafetyOverride:         false,
-			Reason:                 "saturation-only mode: " + string(action),
-			GPUsPerReplica:         gpusPerReplica,
+			VariantName:        variantName,
+			Namespace:          saturationAnalysis.Namespace,
+			ModelID:            saturationAnalysis.ModelID,
+			CurrentReplicas:    state.CurrentReplicas,
+			TargetReplicas:     targetReplicas,
+			DesiredReplicas:    state.DesiredReplicas,
+			Action:             action,
+			SaturationBased:    true,
+			SaturationOnly:     true,
+			ModelBasedDecision: false,
+			SafetyOverride:     false,
+			Reason:             "saturation-only mode: " + string(action),
 		}
 
 		if va != nil {
 			decision.AcceleratorName = va.AcceleratorName
 			decision.Cost = va.Cost
-			// Use average spare KV capacity as the SpareCapacity indicator for limiter prioritization
-			decision.SpareCapacity = va.AvgSpareKvCapacity
 		} else {
 			logger.Info("No variant analysis found for decision (metrics may be unavailable)",
 				"variant", variantName)

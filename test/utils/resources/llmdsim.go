@@ -6,7 +6,6 @@ import (
 	promoperator "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
@@ -69,7 +68,7 @@ func CreateLlmdSimDeployment(namespace, deployName, modelName, appLabel, port st
 								}},
 							},
 							Ports: []corev1.ContainerPort{
-								{ContainerPort: 8000, Name: "http", Protocol: corev1.ProtocolTCP},
+								{ContainerPort: 8000, Name: appLabel, Protocol: corev1.ProtocolTCP},
 							},
 						},
 					},
@@ -78,143 +77,6 @@ func CreateLlmdSimDeployment(namespace, deployName, modelName, appLabel, port st
 			},
 		},
 	}
-}
-
-// CreateLlmdSimDeploymentWithGPU creates a llm-d-sim deployment with GPU resource requests.
-// gpusPerReplica specifies the number of GPUs to request per replica.
-// gpuType specifies the GPU vendor: "nvidia", "amd", or "intel" (defaults to "nvidia" if empty).
-// If gpusPerReplica is 0, no GPU resources are requested (same as CreateLlmdSimDeployment).
-func CreateLlmdSimDeploymentWithGPU(namespace, deployName, modelName, appLabel, port string, avgTTFT, avgITL int, replicas int32, gpusPerReplica int, gpuType string) *appsv1.Deployment {
-	if gpuType == "" {
-		gpuType = "nvidia"
-	}
-	gpuResourceName := corev1.ResourceName(gpuType + ".com/gpu")
-
-	container := corev1.Container{
-		Name:            appLabel,
-		Image:           "ghcr.io/llm-d/llm-d-inference-sim:latest",
-		ImagePullPolicy: corev1.PullAlways,
-		Args: []string{
-			"--model",
-			modelName,
-			"--port",
-			port,
-			fmt.Sprintf("--time-to-first-token=%d", avgTTFT),
-			fmt.Sprintf("--inter-token-latency=%d", avgITL),
-			"--mode=random",
-			"--enable-kvcache",
-			"--kv-cache-size=1024",
-			"--block-size=16",
-		},
-		Env: []corev1.EnvVar{
-			{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{
-				FieldRef: &corev1.ObjectFieldSelector{
-					APIVersion: "v1",
-					FieldPath:  "metadata.name",
-				},
-			}},
-			{Name: "POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{
-				FieldRef: &corev1.ObjectFieldSelector{
-					APIVersion: "v1",
-					FieldPath:  "metadata.namespace",
-				},
-			}},
-		},
-		Ports: []corev1.ContainerPort{
-			{ContainerPort: 8000, Name: "http", Protocol: corev1.ProtocolTCP},
-		},
-	}
-
-	// Add GPU resource requests if specified
-	if gpusPerReplica > 0 {
-		gpuQty := resource.MustParse(fmt.Sprintf("%d", gpusPerReplica))
-		container.Resources = corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				gpuResourceName: gpuQty,
-			},
-			Limits: corev1.ResourceList{
-				gpuResourceName: gpuQty,
-			},
-		}
-	}
-
-	return &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      deployName,
-			Namespace: namespace,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: ptr.To(replicas),
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app":                       appLabel,
-					"llm-d.ai/inferenceServing": "true",
-					"llm-d.ai/model":            "ms-sim-llm-d-modelservice",
-				},
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app":                       appLabel,
-						"llm-d.ai/inferenceServing": "true",
-						"llm-d.ai/model":            "ms-sim-llm-d-modelservice",
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers:    []corev1.Container{container},
-					RestartPolicy: corev1.RestartPolicyAlways,
-				},
-			},
-		},
-	}
-}
-
-// CreateLlmdSimDeploymentWithGPUAndNodeSelector creates a deployment with GPU resources
-// and node selector to target specific GPU configurations.
-// nodeSelector maps label keys to values (e.g., "gpu-config": "4H100")
-func CreateLlmdSimDeploymentWithGPUAndNodeSelector(
-	namespace, deployName, modelName, appLabel, port string,
-	avgTTFT, avgITL int, replicas int32,
-	gpusPerReplica int, gpuType string,
-	nodeSelector map[string]string,
-) *appsv1.Deployment {
-	deployment := CreateLlmdSimDeploymentWithGPU(
-		namespace, deployName, modelName, appLabel, port,
-		avgTTFT, avgITL, replicas, gpusPerReplica, gpuType,
-	)
-
-	if len(nodeSelector) > 0 {
-		deployment.Spec.Template.Spec.NodeSelector = nodeSelector
-	}
-
-	return deployment
-}
-
-// CreateLlmdSimDeploymentWithGPUAndLabels creates a deployment with GPU resources,
-// node selector, and additional pod labels for InferencePool selection.
-// extraLabels are added to both selector and template labels.
-func CreateLlmdSimDeploymentWithGPUAndLabels(
-	namespace, deployName, modelName, appLabel, port string,
-	avgTTFT, avgITL int, replicas int32,
-	gpusPerReplica int, gpuType string,
-	nodeSelector map[string]string,
-	extraLabels map[string]string,
-) *appsv1.Deployment {
-	deployment := CreateLlmdSimDeploymentWithGPUAndNodeSelector(
-		namespace, deployName, modelName, appLabel, port,
-		avgTTFT, avgITL, replicas, gpusPerReplica, gpuType,
-		nodeSelector,
-	)
-
-	// Add extra labels to both selector and template labels
-	if len(extraLabels) > 0 {
-		for k, v := range extraLabels {
-			deployment.Spec.Selector.MatchLabels[k] = v
-			deployment.Spec.Template.Labels[k] = v
-		}
-	}
-
-	return deployment
 }
 
 // creates a service for the llm-d-sim deployment
@@ -235,7 +97,7 @@ func CreateLlmdSimService(namespace, serviceName, appLabel string, nodePort, por
 			},
 			Ports: []corev1.ServicePort{
 				{
-					Name:       "http",
+					Name:       appLabel,
 					Port:       int32(port),
 					Protocol:   corev1.ProtocolTCP,
 					TargetPort: intstr.FromInt32(int32(port)),
@@ -266,7 +128,7 @@ func CreateLlmdSimServiceMonitor(name, namespace, targetNamespace, appLabel stri
 			},
 			Endpoints: []promoperator.Endpoint{
 				{
-					Port:     "http",
+					Port:     appLabel,
 					Path:     "/metrics",
 					Interval: promoperator.Duration("15s"),
 				},

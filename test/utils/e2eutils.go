@@ -1224,23 +1224,14 @@ func GetQueueMetrics(namespace string) (podQueues map[string]float64, totalQueue
 	return podQueues, totalQueue, nil
 }
 
-// setEnvIfNotSet sets an environment variable only if it's not already set.
-// This allows CI to override defaults by setting env vars before running tests.
-func setEnvIfNotSet(key, value string) {
-	if os.Getenv(key) == "" {
-		gom.Expect(os.Setenv(key, value)).To(gom.Succeed())
-	}
-}
-
 // setupEnvironment sets up necessary environment variables for the E2E tests
 func SetupTestEnvironment(image string, numNodes, gpusPerNode int, gpuTypes string) {
 	// Set default environment variables for Kind cluster creation
-	// Note: These use setEnvIfNotSet to allow CI workflow to override with different values
 	gom.Expect(os.Setenv("IMG", image)).To(gom.Succeed())
 	gom.Expect(os.Setenv("CLUSTER_NAME", clusterName)).To(gom.Succeed())
-	setEnvIfNotSet("CLUSTER_NODES", fmt.Sprintf("%d", numNodes))
-	setEnvIfNotSet("CLUSTER_GPUS", fmt.Sprintf("%d", gpusPerNode))
-	setEnvIfNotSet("CLUSTER_GPU_TYPE", gpuTypes) // Use CLUSTER_GPU_TYPE to match Makefile
+	gom.Expect(os.Setenv("CLUSTER_NODES", fmt.Sprintf("%d", numNodes))).To(gom.Succeed())
+	gom.Expect(os.Setenv("CLUSTER_GPUS", fmt.Sprintf("%d", gpusPerNode))).To(gom.Succeed())
+	gom.Expect(os.Setenv("CLUSTER_TYPE", gpuTypes)).To(gom.Succeed())
 	gom.Expect(os.Setenv("WVA_IMAGE_PULL_POLICY", "IfNotPresent")).To(gom.Succeed()) // The image is built locally by the tests
 	gom.Expect(os.Setenv("CREATE_CLUSTER", "true")).To(gom.Succeed())                // Always create a new cluster for E2E tests
 

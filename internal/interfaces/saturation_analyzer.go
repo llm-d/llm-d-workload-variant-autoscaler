@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -68,113 +67,34 @@ type VariantSaturationAnalysis struct {
 	SaturatedReplicas   []string // Pod names of saturated replicas
 }
 
-// DecisionStep represents a single step in the decision pipeline.
-// Each pipeline stage (saturation analysis, resource limiting, etc.) adds its own step.
-type DecisionStep struct {
-	// Name identifies the pipeline stage (e.g., "saturation", "limiter", "enforcer")
-	Name string
-	// Action is the action determined by this step
-	Action SaturationAction
-	// TargetReplicas is the target replicas after this step
-	TargetReplicas int
-	// Reason explains why this step made its decision
-	Reason string
-	// WasConstrained is true if this step modified the previous step's target
-	WasConstrained bool
-	// Timestamp when this step was executed
-	Timestamp metav1.Time
-}
-
-// VariantDecision represents the scaling decision for a single variant.
-//
-// This type serves as shared state that flows through the decision pipeline.
-// Each pipeline stage (saturation analysis, resource limiting, enforcement)
-// reads and modifies the decision, adding its step to DecisionSteps.
-//
-// Pipeline stages modify the state they own:
-//   - Saturation analyzer: sets initial Action, TargetReplicas, SaturationBased
-//   - Resource limiter: may constrain TargetReplicas, adds limiting step
-//   - Enforcer: applies final constraints (min/max), adds enforcement step
+// VariantDecision represents the scaling decision for a single variant
 type VariantDecision struct {
-	// --- Variant identification ---
-	VariantName     string
-	Namespace       string
-	ModelID         string
-	AcceleratorName string
-	Cost            float64
-
-	// --- Scaling state ---
-	Action                 SaturationAction
-	CurrentReplicas        int
-	TargetReplicas         int // Current target (modified by pipeline stages)
-	OriginalTargetReplicas int // Original target before resource limiting (for logging)
-	DesiredReplicas        int // Original desired replicas from optimizer (from CRD status)
-
-	// --- Resource requirements (for resource limiting) ---
-	GPUsPerReplica int // GPUs required per replica
-	// SpareCapacity indicates how much spare capacity this variant has.
-	// 0.0 = fully saturated, 1.0 = completely idle.
-	// Used by allocation algorithms to prioritize saturated variants.
-	SpareCapacity float64
-	// ScaleTargetRef references the Deployment/StatefulSet for scheduling constraints
-	ScaleTargetRef *autoscalingv1.CrossVersionObjectReference
-
-	// --- Pipeline tracking ---
-	// DecisionSteps records each pipeline stage's contribution to the final decision.
-	// This replaces the single Reason field with structured multi-step tracking.
-	DecisionSteps []DecisionStep
-	// Reason is kept for backward compatibility and contains the final/summary reason
-	Reason string
-
-	// --- Saturation-specific flags ---
+	VariantName        string
+	Namespace          string
+	ModelID            string
+	AcceleratorName    string
+	Cost               float64
+	Action             SaturationAction
+	CurrentReplicas    int
+	TargetReplicas     int // Suggested replica count
+	DesiredReplicas    int // Desired replicas from optimizer (from CRD status)
+	Reason             string
 	SaturationBased    bool        // True if decision is primarily saturation-driven
 	ModelBasedDecision bool        // True if decision considers model-based optimizer
 	SafetyOverride     bool        // True if saturation veto overrode model-based decision
 	LastRunTime        metav1.Time // Time when decision was made (for status updates)
 	SaturationOnly     bool        // True if operating in saturation-only mode (no model-based analysis)
 
-	// --- Allocation state ---
 	// CurrentAllocation carries the collected metrics/allocation state
 	// This helps the Controller update status without re-collecting metrics
 	CurrentAllocation *Allocation
 
-	// --- Resource limiting results ---
-	// GPUsAllocated is the number of GPUs allocated by the resource limiter
-	GPUsAllocated int
-	// WasLimited indicates if the target was constrained by resource limits
-	WasLimited bool
-	// LimitedBy identifies which limiter constrained the decision (if any)
-	LimitedBy string
-
-	// --- Metrics availability ---
 	// MetricsAvailable indicates whether saturation metrics were available for this decision
 	MetricsAvailable bool
 	// MetricsReason is the reason for the MetricsAvailable condition
 	MetricsReason string
 	// MetricsMessage is the human-readable message for the MetricsAvailable condition
 	MetricsMessage string
-}
-
-// AddDecisionStep adds a step to the decision pipeline history.
-// This should be called by each pipeline stage after modifying the decision.
-func (d *VariantDecision) AddDecisionStep(name string, reason string, wasConstrained bool) {
-	step := DecisionStep{
-		Name:           name,
-		Action:         d.Action,
-		TargetReplicas: d.TargetReplicas,
-		Reason:         reason,
-		WasConstrained: wasConstrained,
-		Timestamp:      metav1.Now(),
-	}
-	d.DecisionSteps = append(d.DecisionSteps, step)
-}
-
-// LastStep returns the most recent decision step, or nil if none.
-func (d *VariantDecision) LastStep() *DecisionStep {
-	if len(d.DecisionSteps) == 0 {
-		return nil
-	}
-	return &d.DecisionSteps[len(d.DecisionSteps)-1]
 }
 
 // SaturationAction represents the scaling action
@@ -198,10 +118,6 @@ type VariantReplicaState struct {
 	// WVA uses this to prevent cascade scaling - avoiding new scale-up requests
 	// while pending pods are still becoming ready.
 	PendingReplicas int
-	// GPUsPerReplica is the number of GPUs required per replica, extracted from
-	// the deployment's container resource requests (nvidia.com/gpu, amd.com/gpu, etc.).
-	// Defaults to 1 if no GPU requests are found.
-	GPUsPerReplica int
 }
 
 // SaturationAnalyzer analyzes replica saturation metrics and recommends scaling decisions

@@ -44,9 +44,7 @@ Options:
     -c CLUSTER_NAME    Cluster name (default: $DEFAULT_CLUSTER_NAME)
     -n NODES           Number of nodes (default: $DEFAULT_NODES)
     -g GPUS            GPUs per node (default: $DEFAULT_GPUS_PER_NODE)
-    -t TYPE            GPU type: nvidia, amd, intel, mix, nvidia-mix, amd-mix (default: $DEFAULT_GPU_TYPE)
-                       - nvidia-mix: H100, A100, MI300X heterogeneous (for limiter tests)
-                       - amd-mix: MI300X, MI250, A100 heterogeneous (for limiter tests)
+    -t TYPE            GPU type: nvidia, amd, intel, mix (default: $DEFAULT_GPU_TYPE)
     -d MODEL           GPU model (default: $DEFAULT_GPU_MODEL)
     -m MEMORY          GPU memory in MB (default: $DEFAULT_GPU_MEMORY)
     -h                 Show this help message
@@ -59,9 +57,9 @@ EOF
 
 validate_gpu_type() {
     case "$1" in
-        nvidia|amd|intel|mix|nvidia-mix|amd-mix) return 0 ;;
+        nvidia|amd|intel|mix) return 0 ;;
         *)
-            echo "Error: Invalid GPU type '$1'. Valid: nvidia, amd, intel, mix, nvidia-mix, amd-mix"
+            echo "Error: Invalid GPU type '$1'. Valid: nvidia, amd, intel, mix"
             exit 1
             ;;
     esac
@@ -158,66 +156,25 @@ metadata:
 "
 }
 
-# Patch node with custom label for GPU configuration targeting
-patch_node_custom_label() {
-    local node_name="$1"
-    local label_key="$2"
-    local label_value="$3"
-    kubectl label node "${node_name}" "${label_key}=${label_value}" --overwrite
-}
-
 nodes_list=$(kubectl get nodes --no-headers -o custom-columns=":metadata.name")
 node_array=($nodes_list)
 
 for i in "${!node_array[@]}"; do
     node_name="${node_array[$i]}"
-    custom_label=""
 
-    case "$gpu_type" in
-        "nvidia-mix")
-            # Heterogeneous NVIDIA-focused: H100, A100, AMD MI300X
-            case $((i % 3)) in
-                0) current_type="nvidia"; current_model="NVIDIA-H100-SXM5-80GB"; current_memory=81920
-                   custom_label="4H100" ;;
-                1) current_type="nvidia"; current_model="NVIDIA-A100-PCIE-80GB"; current_memory=81920
-                   custom_label="4A100" ;;
-                2) current_type="amd";    current_model="AMD-MI300X-192G";       current_memory=196608
-                   custom_label="4MI300X" ;;
-            esac
-            ;;
-        "amd-mix")
-            # Heterogeneous AMD-focused: MI300X, MI250, NVIDIA A100
-            case $((i % 3)) in
-                0) current_type="amd";    current_model="AMD-MI300X-192G";       current_memory=196608
-                   custom_label="4MI300X" ;;
-                1) current_type="amd";    current_model="AMD-MI250-128G";        current_memory=131072
-                   custom_label="4MI250" ;;
-                2) current_type="nvidia"; current_model="NVIDIA-A100-PCIE-80GB"; current_memory=81920
-                   custom_label="4A100" ;;
-            esac
-            ;;
-        "mix")
-            # Original mixed: nvidia, amd, intel
-            case $((i % 3)) in
-                0) current_type="nvidia"; current_model="NVIDIA-A100-PCIE-80GB"; current_memory=81920 ;;
-                1) current_type="amd";    current_model="AMD-MI300X-192G";       current_memory=196608 ;;
-                2) current_type="intel";  current_model="Intel-Gaudi-2-96GB";    current_memory=98304 ;;
-            esac
-            ;;
-        *)
-            # Single vendor type
-            current_type="$gpu_type"
-            current_model="$gpu_model"
-            current_memory="$gpu_memory"
-            ;;
-    esac
+    if [ "$gpu_type" != "mix" ]; then
+        current_type="$gpu_type"
+        current_model="$gpu_model"
+        current_memory="$gpu_memory"
+    else
+        case $((i % 3)) in
+            0) current_type="nvidia"; current_model="NVIDIA-A100-PCIE-80GB"; current_memory=81920 ;;
+            1) current_type="amd";    current_model="AMD-MI300X-192G";       current_memory=196608 ;;
+            2) current_type="intel";  current_model="Intel-Gaudi-2-96GB";    current_memory=98304 ;;
+        esac
+    fi
 
     patch_node_gpu "$node_name" "$current_type" "$gpus_per_node" "$current_model" "$current_memory"
-
-    # Apply custom label if set (for heterogeneous GPU targeting)
-    if [[ -n "${custom_label}" ]]; then
-        patch_node_custom_label "$node_name" "gpu-config" "$custom_label"
-    fi
 done
 
 # --------------------------------------------------------------------
@@ -226,34 +183,18 @@ done
 echo "[3/6] Patching node capacities..."
 for i in "${!node_array[@]}"; do
     node_name="${node_array[$i]}"
-
-    case "$gpu_type" in
-        "nvidia-mix")
-            case $((i % 3)) in
-                0|1) current_type="nvidia" ;;
-                2)   current_type="amd" ;;
-            esac
-            ;;
-        "amd-mix")
-            case $((i % 3)) in
-                0|1) current_type="amd" ;;
-                2)   current_type="nvidia" ;;
-            esac
-            ;;
-        "mix")
-            case $((i % 3)) in
-                0) current_type="nvidia" ;;
-                1) current_type="amd" ;;
-                2) current_type="intel" ;;
-            esac
-            ;;
-        *)
-            current_type="$gpu_type"
-            ;;
-    esac
+    if [ "$gpu_type" != "mix" ]; then
+        current_type="$gpu_type"
+    else
+        case $((i % 3)) in
+            0) current_type="nvidia" ;;
+            1) current_type="amd" ;;
+            2) current_type="intel" ;;
+        esac
+    fi
 
     resource_name="${current_type}.com~1gpu"
-
+    
     # Use kubectl patch with --subresource=status to directly update node status
     # This avoids the need for kubectl proxy and raw curl requests
     kubectl patch node "${node_name}" --subresource=status --type=json -p '[

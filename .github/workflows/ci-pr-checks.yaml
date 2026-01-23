@@ -44,9 +44,7 @@ jobs:
         run: |
           make test
 
-  # E2E tests run in parallel with different configurations:
-  # - HPAScaleToZero feature gate settings (true/false)
-  # - GPU types (nvidia/amd) for limiter tests
+  # E2E tests run in parallel with different HPAScaleToZero feature gate settings
   e2e-tests:
     runs-on: ubuntu-latest
     needs: lint-and-test
@@ -54,16 +52,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # NVIDIA-focused: H100, A100, AMD MI300X heterogeneous for limiter tests
-          - gpu_type: nvidia-mix
-            scale_to_zero: true
-            e2e_gpu_type: nvidia
-          # AMD-focused: MI300X, MI250, NVIDIA A100 heterogeneous for limiter tests
-          - gpu_type: amd-mix
-            scale_to_zero: false
-            e2e_gpu_type: amd
-    name: e2e-tests (gpu=${{ matrix.gpu_type }}, scale-to-zero=${{ matrix.scale_to_zero }})
+        scale_to_zero: [true, false]
+    name: e2e-tests (scale-to-zero=${{ matrix.scale_to_zero }})
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -97,8 +87,5 @@ jobs:
         shell: bash
         env:
           ENABLE_SCALE_TO_ZERO: ${{ matrix.scale_to_zero }}
-          CLUSTER_GPU_TYPE: ${{ matrix.gpu_type }}
-          E2E_GPU_TYPE: ${{ matrix.e2e_gpu_type }}
-          MULTI_MODEL_TESTING: "false"
         run: |
           make test-e2e
