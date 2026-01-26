@@ -1258,3 +1258,59 @@ func SetupTestEnvironment(image string, numNodes, gpusPerNode int, gpuTypes stri
 	gom.Expect(os.Setenv("DEPLOY_HPA", "false")).To(gom.Succeed())                 // tests create their own HPAs if needed
 	gom.Expect(os.Setenv("VLLM_SVC_ENABLED", "false")).To(gom.Succeed())           // tests deploy their own Service
 }
+
+// WaitForSaturationMetrics waits for Prometheus to have scraped saturation metrics for a given model.
+// This ensures the saturation engine can detect saturation before load generation starts.
+// Returns nil when metrics are available, or an error if timeout is reached.
+//
+// Note: The function tries multiple metric name formats to handle different metric naming conventions:
+// - vllm:kv_cache_usage_perc (recording rule format, used by saturation engine)
+// - vllm_kv_cache_usage_perc (raw OpenMetrics format from llm-d-sim)
+// - vllm:gpu_cache_usage_perc (alternative recording rule format)
+func WaitForSaturationMetrics(ctx context.Context, prometheusPort int, namespace, modelName string, timeout time.Duration) error {
+	client, err := NewPrometheusClient(fmt.Sprintf("https://localhost:%d", prometheusPort), true)
+	if err != nil {
+		return fmt.Errorf("failed to create prometheus client: %w", err)
+	}
+
+	// Try multiple metric name formats to handle different naming conventions
+	metricQueries := []string{
+		// Recording rule format (with colon) - used by saturation engine
+		fmt.Sprintf(`vllm:kv_cache_usage_perc{namespace="%s",model_name="%s"}`, namespace, modelName),
+		// Raw OpenMetrics format (with underscore) - exposed by llm-d-sim
+		fmt.Sprintf(`vllm_kv_cache_usage_perc{namespace="%s",model_name="%s"}`, namespace, modelName),
+		// Alternative GPU cache metric
+		fmt.Sprintf(`vllm:gpu_cache_usage_perc{namespace="%s",model_name="%s"}`, namespace, modelName),
+		// Try without model_name filter (some deployments use different labels)
+		fmt.Sprintf(`vllm:kv_cache_usage_perc{namespace="%s"}`, namespace),
+		fmt.Sprintf(`vllm_kv_cache_usage_perc{namespace="%s"}`, namespace),
+	}
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		for _, query := range metricQueries {
+			queryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			result, _, err := client.client.Query(queryCtx, query, time.Now())
+			cancel()
+
+			if err != nil {
+				// Query error, try next format
+				continue
+			}
+
+			// Check if we got any results
+			if result.Type() == model.ValVector {
+				vector, ok := result.(model.Vector)
+				if ok && len(vector) > 0 {
+					fmt.Printf("Debug: Saturation metrics available - found %d samples using query: %s\n", len(vector), query)
+					return nil
+				}
+			}
+		}
+
+		fmt.Printf("Debug: Saturation metrics not yet available for model %s (tried %d formats), waiting...\n", modelName, len(metricQueries))
+		time.Sleep(10 * time.Second)
+	}
+
+	return fmt.Errorf("timeout waiting for saturation metrics for model %s in namespace %s", modelName, namespace)
+}

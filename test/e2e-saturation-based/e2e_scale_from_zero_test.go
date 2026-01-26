@@ -247,6 +247,23 @@ var _ = Describe("Test workload-variant-autoscaler - Scale-From-Zero Feature", O
 				_, _ = fmt.Fprintf(GinkgoWriter, "Current replicas: %d, ready: %d (waiting for > 0)\n",
 					currentReplicas, readyReplicas)
 
+				// Log pod status for debugging if replicas exist but not ready
+				if currentReplicas > 0 && readyReplicas == 0 {
+					podList, podErr := k8sClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+						LabelSelector: fmt.Sprintf("app=%s", appLabel),
+					})
+					if podErr == nil && len(podList.Items) > 0 {
+						for _, pod := range podList.Items {
+							_, _ = fmt.Fprintf(GinkgoWriter, "  Pod %s: phase=%s, conditions=%v\n",
+								pod.Name, pod.Status.Phase, pod.Status.Conditions)
+							for _, cs := range pod.Status.ContainerStatuses {
+								_, _ = fmt.Fprintf(GinkgoWriter, "    Container %s: ready=%v, state=%+v\n",
+									cs.Name, cs.Ready, cs.State)
+							}
+						}
+					}
+				}
+
 				g.Expect(currentReplicas).To(BeNumerically(">", 0),
 					"Deployment should have scaled up from zero")
 				g.Expect(readyReplicas).To(BeNumerically(">", 0),
@@ -348,7 +365,27 @@ var _ = Describe("Test workload-variant-autoscaler - Scale-From-Zero Feature", O
 				deploy, err := k8sClient.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
 				g.Expect(err).NotTo(HaveOccurred())
 
-				_, _ = fmt.Fprintf(GinkgoWriter, "Current ready replicas: %d (waiting for > 0)\n", deploy.Status.ReadyReplicas)
+				currentReplicas := deploy.Status.Replicas
+				readyReplicas := deploy.Status.ReadyReplicas
+				_, _ = fmt.Fprintf(GinkgoWriter, "Current replicas: %d, ready: %d (waiting for > 0)\n",
+					currentReplicas, readyReplicas)
+
+				// Log pod status for debugging if replicas exist but not ready
+				if currentReplicas > 0 && readyReplicas == 0 {
+					podList, podErr := k8sClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+						LabelSelector: fmt.Sprintf("app=%s", appLabel),
+					})
+					if podErr == nil && len(podList.Items) > 0 {
+						for _, pod := range podList.Items {
+							_, _ = fmt.Fprintf(GinkgoWriter, "  Pod %s: phase=%s, conditions=%v\n",
+								pod.Name, pod.Status.Phase, pod.Status.Conditions)
+							for _, cs := range pod.Status.ContainerStatuses {
+								_, _ = fmt.Fprintf(GinkgoWriter, "    Container %s: ready=%v, state=%+v\n",
+									cs.Name, cs.Ready, cs.State)
+							}
+						}
+					}
+				}
 
 				g.Expect(deploy.Status.ReadyReplicas).To(BeNumerically(">", 0),
 					"Deployment should scale up to handle concurrent requests")

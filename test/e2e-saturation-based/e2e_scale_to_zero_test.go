@@ -279,6 +279,10 @@ retention_period: %s`, modelName, retentionPeriodShort),
 			err := utils.VerifyPortForwardReadiness(ctx, prometheusLocalPort, fmt.Sprintf("https://localhost:%d/api/v1/query?query=up", prometheusLocalPort))
 			Expect(err).NotTo(HaveOccurred(), "Prometheus port-forward should be ready within timeout")
 
+			By("waiting for Prometheus to scrape saturation metrics from llm-d-sim pods")
+			err = utils.WaitForSaturationMetrics(ctx, prometheusLocalPort, namespace, modelName, 5*time.Minute)
+			Expect(err).NotTo(HaveOccurred(), "Prometheus should scrape saturation metrics within timeout")
+
 			By("starting load generation to trigger saturation")
 			loadGenJob, err = utils.CreateLoadGeneratorJob(
 				namespace,
@@ -299,20 +303,9 @@ retention_period: %s`, modelName, retentionPeriodShort),
 				Expect(err).NotTo(HaveOccurred(), "Should be able to stop load generator")
 			}()
 
-			By("waiting for job pod to be running")
-			Eventually(func(g Gomega) {
-				podList, err := k8sClient.CoreV1().Pods(llmDNamespace).List(ctx, metav1.ListOptions{
-					LabelSelector: fmt.Sprintf("job-name=%s", loadGenJob.Name),
-				})
-				g.Expect(err).NotTo(HaveOccurred(), "Should be able to list job pods")
-				g.Expect(podList.Items).NotTo(BeEmpty(), "Job pod should exist")
-
-				pod := podList.Items[0]
-				g.Expect(pod.Status.Phase).To(Or(
-					Equal(corev1.PodRunning),
-					Equal(corev1.PodSucceeded),
-				), fmt.Sprintf("Job pod should be running or succeeded, but is in phase: %s", pod.Status.Phase))
-			}, 10*time.Minute, 5*time.Second).Should(Succeed())
+			By("waiting for load generator to be ready (pod running + pip install complete)")
+			err = utils.WaitForLoadGeneratorReady(ctx, loadGenJob, k8sClient, GinkgoWriter)
+			Expect(err).NotTo(HaveOccurred(), "Load generator should become ready")
 
 			_, _ = fmt.Fprintf(GinkgoWriter, "Load generation job is running\n")
 
@@ -678,6 +671,10 @@ enable_scale_to_zero: false`, modelName),
 			By("waiting for Prometheus port-forward to be ready")
 			err := utils.VerifyPortForwardReadiness(ctx, prometheusLocalPort, fmt.Sprintf("https://localhost:%d/api/v1/query?query=up", prometheusLocalPort))
 			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for Prometheus to scrape saturation metrics from llm-d-sim pods")
+			err = utils.WaitForSaturationMetrics(ctx, prometheusLocalPort, namespace, modelName, 5*time.Minute)
+			Expect(err).NotTo(HaveOccurred(), "Prometheus should scrape saturation metrics within timeout")
 
 			By("starting load generation")
 			loadGenJob, err = utils.CreateLoadGeneratorJob(
