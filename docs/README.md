@@ -11,6 +11,9 @@ Getting started and using WVA:
 - **[Installation Guide](user-guide/installation.md)** - Installing WVA on your cluster
 - **[Configuration](user-guide/configuration.md)** - Configuring WVA for your workloads
 - **[CRD Reference](user-guide/crd-reference.md)** - Complete API reference for VariantAutoscaling
+- **[GPU Limiter](user-guide/gpu-limiter.md)** - Resource-aware scaling based on GPU availability (Experimental)
+- **[Scale to Zero](user-guide/scale-to-zero.md)** - Automatic scaling for idle model deployments
+- **[Scale from Zero](user-guide/scale-from-zero.md)** - Automatic scale-up when requests arrive
 - **[Multi-Controller Isolation](user-guide/multi-controller-isolation.md)** - Running multiple WVA controller instances
 
 ### Tutorials

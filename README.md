@@ -12,7 +12,9 @@ The Workload-Variant-Autoscaler (WVA) is a Kubernetes controller that performs i
 
 - **Intelligent Autoscaling**: Optimizes replica count and GPU allocation based on inference server saturation
 - **Cost Optimization**: Minimizes infrastructure costs while meeting SLO requirements
-<!-- 
+- **GPU Limiter** (Experimental): Constrains scaling decisions based on actual GPU availability per accelerator type
+- **Scale to Zero**: Automatically scales idle models to zero replicas, freeing GPU resources
+<!--
 - **Performance Modeling**: Uses queueing theory (M/M/1/k, M/G/1 models) for accurate latency and throughput prediction
 - **Multi-Model Support**: Manages multiple models with different service classes and priorities -->
 
@@ -62,6 +64,8 @@ See the [Installation Guide](docs/user-guide/installation.md) for detailed instr
 - [Installation Guide](docs/user-guide/installation.md)
 - [Configuration](docs/user-guide/configuration.md)
 - [CRD Reference](docs/user-guide/crd-reference.md)
+- [GPU Limiter](docs/user-guide/gpu-limiter.md) - Resource-aware scaling constraints (Experimental)
+- [Scale to Zero](docs/user-guide/scale-to-zero.md) - Automatic scaling for idle models
 - [Multi-Controller Isolation](docs/user-guide/multi-controller-isolation.md)
 
 <!-- 
