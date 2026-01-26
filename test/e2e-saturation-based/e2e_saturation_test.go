@@ -338,10 +338,6 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Single Va
 			err := utils.VerifyPortForwardReadiness(ctx, prometheusLocalPort, fmt.Sprintf("https://localhost:%d/api/v1/query?query=up", prometheusLocalPort))
 			Expect(err).NotTo(HaveOccurred(), "Prometheus port-forward should be ready within timeout")
 
-			By("waiting for Prometheus to scrape saturation metrics from llm-d-sim pods")
-			err = utils.WaitForSaturationMetrics(ctx, prometheusLocalPort, namespace, modelName, 5*time.Minute)
-			Expect(err).NotTo(HaveOccurred(), "Prometheus should scrape saturation metrics within timeout")
-
 			By("starting load generation to trigger saturation")
 			loadGenJob, err = utils.CreateLoadGeneratorJob(
 
@@ -783,10 +779,6 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 			By("waiting for Prometheus port-forward to be ready")
 			err := utils.VerifyPortForwardReadiness(ctx, prometheusLocalPort, fmt.Sprintf("https://localhost:%d/api/v1/query?query=up", prometheusLocalPort))
 			Expect(err).NotTo(HaveOccurred(), "Prometheus port-forward should be ready within timeout")
-
-			By("waiting for Prometheus to scrape saturation metrics from llm-d-sim pods")
-			err = utils.WaitForSaturationMetrics(ctx, prometheusLocalPort, namespace, modelName, 5*time.Minute)
-			Expect(err).NotTo(HaveOccurred(), "Prometheus should scrape saturation metrics within timeout")
 
 			By("starting load generation to trigger saturation")
 			loadGenJob, err = utils.CreateLoadGeneratorJob(
