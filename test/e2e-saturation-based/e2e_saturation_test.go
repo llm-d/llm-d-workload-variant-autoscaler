@@ -272,11 +272,12 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Single Va
 				g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to fetch VariantAutoscaling for: %s", deployName))
 
 				// Wait for DesiredOptimizedAlloc to be populated (ensures reconciliation loop is active)
+				// Accelerator is populated from VA label even without Prometheus metrics
 				g.Expect(va.Status.DesiredOptimizedAlloc.Accelerator).NotTo(BeEmpty(),
 					"DesiredOptimizedAlloc should be populated with accelerator info")
 				g.Expect(va.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically(">=", 0),
 					"DesiredOptimizedAlloc should have NumReplicas set")
-			}, 10*time.Minute, 10*time.Second).Should(Succeed())
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
 			By("querying external metrics API")
 			Eventually(func(g Gomega) {
@@ -693,42 +694,7 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 
 	Context("Before load - initial replica count", func() {
 		It("should have correct initial replica counts before applying load", func() {
-			// TODO: Re-enable once MetricsAvailable condition is properly persisted in saturation mode
-			// By("waiting for A100 variant CurrentAlloc to be populated with metrics data")
-			// Eventually(func(g Gomega) {
-			// 	vaA100 := &v1alpha1.VariantAutoscaling{}
-			// 	err := crClient.Get(ctx, client.ObjectKey{
-			// 		Namespace: namespace,
-			// 		Name:      deployNameA100,
-			// 	}, vaA100)
-			// 	g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to fetch VariantAutoscaling for: %s", deployNameA100))
-			//
-			// 	// In saturation mode, wait for MetricsAvailable condition
-			// 	metricsCondition := v1alpha1.GetCondition(vaA100, v1alpha1.TypeMetricsAvailable)
-			// 	g.Expect(metricsCondition).NotTo(BeNil(),
-			// 		fmt.Sprintf("VariantAutoscaling %s should have MetricsAvailable condition", vaA100.Name))
-			// 	g.Expect(metricsCondition.Status).To(Equal(metav1.ConditionTrue),
-			// 		fmt.Sprintf("VariantAutoscaling %s MetricsAvailable condition should be True", vaA100.Name))
-			// }, 4*time.Minute, 10*time.Second).Should(Succeed())
-			//
-			// By("waiting for H100 variant CurrentAlloc to be populated with metrics data")
-			// Eventually(func(g Gomega) {
-			// 	vaH100 := &v1alpha1.VariantAutoscaling{}
-			// 	err := crClient.Get(ctx, client.ObjectKey{
-			// 		Namespace: namespace,
-			// 		Name:      deployNameH100,
-			// 	}, vaH100)
-			// 	g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to fetch VariantAutoscaling for: %s", deployNameH100))
-			//
-			// 	// In saturation mode, wait for MetricsAvailable condition
-			// 	metricsCondition := v1alpha1.GetCondition(vaH100, v1alpha1.TypeMetricsAvailable)
-			// 	g.Expect(metricsCondition).NotTo(BeNil(),
-			// 		fmt.Sprintf("VariantAutoscaling %s should have MetricsAvailable condition", vaH100.Name))
-			// 	g.Expect(metricsCondition.Status).To(Equal(metav1.ConditionTrue),
-			// 		fmt.Sprintf("VariantAutoscaling %s MetricsAvailable condition should be True", vaH100.Name))
-			// }, 4*time.Minute, 10*time.Second).Should(Succeed())
-
-			By("waiting for VariantAutoscalings CurrentAlloc to be populated with metrics data")
+			By("waiting for A100 VariantAutoscaling DesiredOptimizedAlloc to be populated")
 			Eventually(func(g Gomega) {
 				vaA100 := &v1alpha1.VariantAutoscaling{}
 				err := crClient.Get(ctx, client.ObjectKey{
@@ -737,15 +703,15 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 				}, vaA100)
 				g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to fetch VariantAutoscaling for: %s", deployNameA100))
 
-				// In saturation mode, wait for CurrentAlloc to be populated (no MetricsAvailable condition)
-				// In saturation mode, wait for CurrentAlloc to be populated (no MetricsAvailable condition)
-				// CurrentAlloc removed
-				// g.Expect(vaA100.Status.CurrentAlloc.Accelerator).NotTo(BeEmpty(),
-				// 	"CurrentAlloc should be populated with accelerator info")
-				// g.Expect(vaA100.Status.CurrentAlloc.NumReplicas).To(BeNumerically(">=", 0),
-				// 	"CurrentAlloc should have NumReplicas set")
+				// Wait for DesiredOptimizedAlloc to be populated (ensures reconciliation loop is active)
+				// Accelerator is populated from VA label even without Prometheus metrics
+				g.Expect(vaA100.Status.DesiredOptimizedAlloc.Accelerator).NotTo(BeEmpty(),
+					"DesiredOptimizedAlloc should be populated with accelerator info")
+				g.Expect(vaA100.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically(">=", 0),
+					"DesiredOptimizedAlloc should have NumReplicas set")
 			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
+			By("waiting for H100 VariantAutoscaling DesiredOptimizedAlloc to be populated")
 			Eventually(func(g Gomega) {
 				vaH100 := &v1alpha1.VariantAutoscaling{}
 				err := crClient.Get(ctx, client.ObjectKey{
@@ -754,13 +720,13 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 				}, vaH100)
 				g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to fetch VariantAutoscaling for: %s", deployNameH100))
 
-				// In saturation mode, wait for CurrentAlloc to be populated (no MetricsAvailable condition)
-				// CurrentAlloc removed
-				// g.Expect(vaH100.Status.CurrentAlloc.Accelerator).NotTo(BeEmpty(),
-				// 	"CurrentAlloc should be populated with accelerator info")
-				// g.Expect(vaH100.Status.CurrentAlloc.NumReplicas).To(BeNumerically(">=", 0),
-				// 	"CurrentAlloc should have NumReplicas set")
-			}, 10*time.Minute, 10*time.Second).Should(Succeed())
+				// Wait for DesiredOptimizedAlloc to be populated (ensures reconciliation loop is active)
+				// Accelerator is populated from VA label even without Prometheus metrics
+				g.Expect(vaH100.Status.DesiredOptimizedAlloc.Accelerator).NotTo(BeEmpty(),
+					"DesiredOptimizedAlloc should be populated with accelerator info")
+				g.Expect(vaH100.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically(">=", 0),
+					"DesiredOptimizedAlloc should have NumReplicas set")
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
 			By("verifying A100 variant has expected initial replicas or scales down (before load)")
 			Eventually(func(g Gomega) {

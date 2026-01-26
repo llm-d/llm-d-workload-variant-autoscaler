@@ -226,11 +226,12 @@ retention_period: %s`, modelName, retentionPeriodShort),
 				g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to fetch VariantAutoscaling for: %s", deployName))
 
 				// Wait for DesiredOptimizedAlloc to be populated (ensures reconciliation loop is active)
+				// Accelerator is populated from VA label even without Prometheus metrics
 				g.Expect(va.Status.DesiredOptimizedAlloc.Accelerator).NotTo(BeEmpty(),
 					"DesiredOptimizedAlloc should be populated with accelerator info")
 				g.Expect(va.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically(">=", 0),
 					"DesiredOptimizedAlloc should have NumReplicas set")
-			}, 10*time.Minute, 10*time.Second).Should(Succeed())
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
 			By("querying external metrics API")
 			Eventually(func(g Gomega) {
@@ -646,19 +647,23 @@ enable_scale_to_zero: false`, modelName),
 		})
 
 		It("should have DesiredOptimizedAlloc populated with non-zero replicas", func() {
-			By("waiting for DesiredOptimizedAlloc to be populated")
+			By("waiting for DesiredOptimizedAlloc to be populated with non-zero replicas")
 			Eventually(func(g Gomega) {
 				va := &v1alpha1.VariantAutoscaling{}
 				err := crClient.Get(ctx, client.ObjectKey{
 					Namespace: namespace,
 					Name:      deployName,
 				}, va)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(va.Status.DesiredOptimizedAlloc.Accelerator).NotTo(BeEmpty())
+				g.Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to fetch VariantAutoscaling for: %s", deployName))
+
+				// Wait for DesiredOptimizedAlloc to be populated (ensures reconciliation loop is active)
+				// Accelerator is populated from VA label even without Prometheus metrics
+				g.Expect(va.Status.DesiredOptimizedAlloc.Accelerator).NotTo(BeEmpty(),
+					"DesiredOptimizedAlloc should have accelerator populated")
 				// When scale-to-zero is disabled, should maintain at least 1 replica
 				g.Expect(va.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically(">=", 1),
 					"With scale-to-zero disabled, should have at least 1 replica")
-			}, 10*time.Minute, 10*time.Second).Should(Succeed())
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
 			_, _ = fmt.Fprintf(GinkgoWriter, "VA has non-zero replicas as expected with scale-to-zero disabled\n")
 		})

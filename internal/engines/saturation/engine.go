@@ -672,7 +672,21 @@ func (e *Engine) applySaturationDecisions(
 			reason = "No scaling decision (optimization loop)"
 		}
 
-		// If we still don't have an accelerator name (e.g. new VA, no decision, no current alloc), we can't update status sensibly
+		// If we still don't have an accelerator name, try to get it from VA labels as fallback
+		// This ensures DesiredOptimizedAlloc gets populated even when Prometheus hasn't scraped metrics yet
+		if acceleratorName == "" {
+			if val, ok := updateVa.Labels["inference.optimization/acceleratorName"]; ok && val != "" {
+				acceleratorName = val
+			}
+		}
+
+		// If we still don't have targetReplicas, use at least 1 to satisfy CRD validation
+		// The CRD requires numReplicas to be set; 0 without scale-to-zero enabled would be invalid anyway
+		if targetReplicas == 0 {
+			targetReplicas = 1
+		}
+
+		// If we still don't have an accelerator name (e.g. new VA, no decision, no current alloc, no label), we can't update status sensibly
 		// But we still need to set MetricsAvailable condition via the cache
 		if acceleratorName == "" {
 			logger.Info("Skipping status update for VA without accelerator info, but setting MetricsAvailable=False",

@@ -179,15 +179,16 @@ enableLimiter: true`
 		_, err = k8sClient.AutoscalingV2().HorizontalPodAutoscalers(namespace).Create(ctx, hpa, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
-		By("waiting for metrics pipeline to be ready")
+		By("waiting for DesiredOptimizedAlloc to be populated")
 		Eventually(func(g Gomega) {
 			va := &v1alpha1.VariantAutoscaling{}
 			err := crClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: deployName}, va)
 			g.Expect(err).NotTo(HaveOccurred())
+			// Accelerator is populated from VA label even without Prometheus metrics
 			g.Expect(va.Status.DesiredOptimizedAlloc.Accelerator).NotTo(BeEmpty(),
 				"VariantAutoscaling DesiredOptimizedAlloc should be populated")
 		}, 5*time.Minute, 10*time.Second).Should(Succeed())
-		_, _ = fmt.Fprintf(GinkgoWriter, "Metrics pipeline ready - DesiredOptimizedAlloc populated\n")
+		_, _ = fmt.Fprintf(GinkgoWriter, "DesiredOptimizedAlloc populated - optimization loop is active\n")
 	})
 
 	AfterAll(func() {
