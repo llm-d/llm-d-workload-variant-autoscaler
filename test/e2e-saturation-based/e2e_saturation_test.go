@@ -188,6 +188,38 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Single Va
 		err = crClient.Create(ctx, serviceMonitor)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to create ServiceMonitor: %s", serviceMonName))
 
+		By("waiting for Prometheus to discover and scrape new ServiceMonitor")
+		_, _ = fmt.Fprintf(GinkgoWriter, "ServiceMonitor created. Waiting 90s for Prometheus to discover and scrape endpoints...\n")
+		time.Sleep(90 * time.Second)
+
+		By("verifying metrics are available in Prometheus before starting tests")
+		// Set up port-forward to Prometheus for verification
+		promPortForwardCmd := utils.SetUpPortForward(k8sClient, ctx, "kube-prometheus-stack-prometheus", controllerMonitoringNamespace, 9090, 9090)
+		defer func() {
+			_ = utils.StopCmd(promPortForwardCmd)
+		}()
+
+		_, _ = fmt.Fprintf(GinkgoWriter, "Waiting for Prometheus port-forward to be ready...\n")
+		err = utils.VerifyPortForwardReadiness(ctx, 9090, fmt.Sprintf("https://localhost:%d/api/v1/query?query=up", 9090))
+		Expect(err).NotTo(HaveOccurred(), "Prometheus port-forward should be ready")
+
+		// Verify that vLLM metrics are being scraped by Prometheus
+		prometheusClient, err := utils.NewPrometheusClient("https://localhost:9090", true)
+		Expect(err).NotTo(HaveOccurred(), "Should be able to create Prometheus client")
+
+		_, _ = fmt.Fprintf(GinkgoWriter, "Checking if Prometheus has scraped vLLM metrics from llm-d-sim pod...\n")
+		Eventually(func(g Gomega) {
+			// Query for vLLM metrics with the model name
+			query := fmt.Sprintf(`vllm:request_success_total{model_name="%s"}`, modelName)
+			_, queryErr := prometheusClient.QueryWithRetry(ctx, query)
+			g.Expect(queryErr).NotTo(HaveOccurred(), "Prometheus should have vLLM metrics available")
+			_, _ = fmt.Fprintf(GinkgoWriter, "Prometheus has vLLM metrics for model: %s\n", modelName)
+		}, 2*time.Minute, 10*time.Second).Should(Succeed(), "Prometheus should scrape vLLM metrics within 2 minutes")
+
+		// Stop the port-forward before continuing with tests
+		err = utils.StopCmd(promPortForwardCmd)
+		Expect(err).NotTo(HaveOccurred(), "Should be able to stop Prometheus port-forward")
+
 		By("waiting for pod to be running before creating VariantAutoscaling")
 		Eventually(func(g Gomega) {
 			podList, err := k8sClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
@@ -588,6 +620,38 @@ var _ = Describe("Test workload-variant-autoscaler - Saturation Mode - Multiple 
 		serviceMonitorH100 := resources.CreateLlmdSimServiceMonitor(serviceMonNameH100, controllerMonitoringNamespace, llmDNamespace, appLabelH100)
 		err = crClient.Create(ctx, serviceMonitorH100)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to create ServiceMonitor: %s", serviceMonNameH100))
+
+		By("waiting for Prometheus to discover and scrape new ServiceMonitors")
+		_, _ = fmt.Fprintf(GinkgoWriter, "ServiceMonitors created. Waiting 90s for Prometheus to discover and scrape endpoints...\n")
+		time.Sleep(90 * time.Second)
+
+		By("verifying metrics are available in Prometheus before starting tests")
+		// Set up port-forward to Prometheus for verification
+		promPortForwardCmd := utils.SetUpPortForward(k8sClient, ctx, "kube-prometheus-stack-prometheus", controllerMonitoringNamespace, 9090, 9090)
+		defer func() {
+			_ = utils.StopCmd(promPortForwardCmd)
+		}()
+
+		_, _ = fmt.Fprintf(GinkgoWriter, "Waiting for Prometheus port-forward to be ready...\n")
+		err = utils.VerifyPortForwardReadiness(ctx, 9090, fmt.Sprintf("https://localhost:%d/api/v1/query?query=up", 9090))
+		Expect(err).NotTo(HaveOccurred(), "Prometheus port-forward should be ready")
+
+		// Verify that vLLM metrics are being scraped by Prometheus
+		prometheusClient, err := utils.NewPrometheusClient("https://localhost:9090", true)
+		Expect(err).NotTo(HaveOccurred(), "Should be able to create Prometheus client")
+
+		_, _ = fmt.Fprintf(GinkgoWriter, "Checking if Prometheus has scraped vLLM metrics from llm-d-sim pods...\n")
+		Eventually(func(g Gomega) {
+			// Query for vLLM metrics with the model name
+			query := fmt.Sprintf(`vllm:request_success_total{model_name="%s"}`, modelName)
+			_, queryErr := prometheusClient.QueryWithRetry(ctx, query)
+			g.Expect(queryErr).NotTo(HaveOccurred(), "Prometheus should have vLLM metrics available")
+			_, _ = fmt.Fprintf(GinkgoWriter, "Prometheus has vLLM metrics for model: %s\n", modelName)
+		}, 2*time.Minute, 10*time.Second).Should(Succeed(), "Prometheus should scrape vLLM metrics within 2 minutes")
+
+		// Stop the port-forward before continuing with tests
+		err = utils.StopCmd(promPortForwardCmd)
+		Expect(err).NotTo(HaveOccurred(), "Should be able to stop Prometheus port-forward")
 
 		By("waiting for A100 pod to be running before creating VariantAutoscaling")
 		Eventually(func(g Gomega) {
