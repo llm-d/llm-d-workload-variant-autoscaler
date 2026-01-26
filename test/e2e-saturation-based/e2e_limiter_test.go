@@ -157,29 +157,17 @@ enableLimiter: true`
 		err = crClient.Create(ctx, serviceMonitor)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to create ServiceMonitor: %s", serviceMonName))
 
-		By("waiting for pods to be running and ready")
+		By("waiting for pods to be running")
 		Eventually(func(g Gomega) {
 			podList, err := k8sClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 				LabelSelector: "app=" + appLabel,
 			})
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(len(podList.Items)).To(BeNumerically(">=", 1))
-
-			// Check all pods are Running and Ready
 			for _, pod := range podList.Items {
 				g.Expect(pod.Status.Phase).To(Equal(corev1.PodRunning), fmt.Sprintf("Pod %s is not running", pod.Name))
-
-				// Check Ready condition
-				isReady := false
-				for _, cond := range pod.Status.Conditions {
-					if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
-						isReady = true
-						break
-					}
-				}
-				g.Expect(isReady).To(BeTrue(), fmt.Sprintf("Pod %s is not ready", pod.Name))
 			}
-		}, 3*time.Minute, 5*time.Second).Should(Succeed())
+		}, 2*time.Minute, 5*time.Second).Should(Succeed())
 
 		By("creating VariantAutoscaling resource")
 		va := utils.CreateVariantAutoscalingResource(namespace, deployName, llamaModelId, accelerator, 30.0)

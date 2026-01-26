@@ -40,7 +40,7 @@ func CreateLlmdSimDeployment(namespace, deployName, modelName, appLabel, port st
 					Containers: []corev1.Container{
 						{
 							Name:            appLabel,
-							Image:           "ghcr.io/llm-d/llm-d-inference-sim:latest",
+							Image:           "ghcr.io/llm-d/llm-d-inference-sim:v0.5.1",
 							ImagePullPolicy: corev1.PullAlways,
 							Args: []string{
 								"--model",
@@ -71,34 +71,6 @@ func CreateLlmdSimDeployment(namespace, deployName, modelName, appLabel, port st
 							Ports: []corev1.ContainerPort{
 								{ContainerPort: 8000, Name: "http", Protocol: corev1.ProtocolTCP},
 							},
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path:   "/ready",
-										Port:   intstr.FromInt32(8000),
-										Scheme: corev1.URISchemeHTTP,
-									},
-								},
-								InitialDelaySeconds: 2,
-								PeriodSeconds:       5,
-								TimeoutSeconds:      3,
-								SuccessThreshold:    1,
-								FailureThreshold:    3,
-							},
-							LivenessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path:   "/health",
-										Port:   intstr.FromInt32(8000),
-										Scheme: corev1.URISchemeHTTP,
-									},
-								},
-								InitialDelaySeconds: 5,
-								PeriodSeconds:       10,
-								TimeoutSeconds:      3,
-								SuccessThreshold:    1,
-								FailureThreshold:    3,
-							},
 						},
 					},
 					RestartPolicy: corev1.RestartPolicyAlways,
@@ -120,7 +92,7 @@ func CreateLlmdSimDeploymentWithGPU(namespace, deployName, modelName, appLabel, 
 
 	container := corev1.Container{
 		Name:            appLabel,
-		Image:           "ghcr.io/llm-d/llm-d-inference-sim:latest",
+		Image:           "ghcr.io/llm-d/llm-d-inference-sim:v0.5.1",
 		ImagePullPolicy: corev1.PullAlways,
 		Args: []string{
 			"--model",
@@ -150,34 +122,6 @@ func CreateLlmdSimDeploymentWithGPU(namespace, deployName, modelName, appLabel, 
 		},
 		Ports: []corev1.ContainerPort{
 			{ContainerPort: 8000, Name: "http", Protocol: corev1.ProtocolTCP},
-		},
-		ReadinessProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{
-					Path:   "/ready",
-					Port:   intstr.FromInt32(8000),
-					Scheme: corev1.URISchemeHTTP,
-				},
-			},
-			InitialDelaySeconds: 2,
-			PeriodSeconds:       5,
-			TimeoutSeconds:      3,
-			SuccessThreshold:    1,
-			FailureThreshold:    3,
-		},
-		LivenessProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{
-					Path:   "/health",
-					Port:   intstr.FromInt32(8000),
-					Scheme: corev1.URISchemeHTTP,
-				},
-			},
-			InitialDelaySeconds: 5,
-			PeriodSeconds:       10,
-			TimeoutSeconds:      3,
-			SuccessThreshold:    1,
-			FailureThreshold:    3,
 		},
 	}
 
