@@ -74,11 +74,12 @@ func CreateLlmdSimDeployment(namespace, deployName, modelName, appLabel, port st
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/health",
-										Port: intstr.FromInt32(8000),
+										Path:   "/ready",
+										Port:   intstr.FromInt32(8000),
+										Scheme: corev1.URISchemeHTTP,
 									},
 								},
-								InitialDelaySeconds: 5,
+								InitialDelaySeconds: 2,
 								PeriodSeconds:       5,
 								TimeoutSeconds:      3,
 								SuccessThreshold:    1,
@@ -87,13 +88,14 @@ func CreateLlmdSimDeployment(namespace, deployName, modelName, appLabel, port st
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/health",
-										Port: intstr.FromInt32(8000),
+										Path:   "/health",
+										Port:   intstr.FromInt32(8000),
+										Scheme: corev1.URISchemeHTTP,
 									},
 								},
-								InitialDelaySeconds: 10,
+								InitialDelaySeconds: 5,
 								PeriodSeconds:       10,
-								TimeoutSeconds:      5,
+								TimeoutSeconds:      3,
 								SuccessThreshold:    1,
 								FailureThreshold:    3,
 							},
@@ -152,11 +154,12 @@ func CreateLlmdSimDeploymentWithGPU(namespace, deployName, modelName, appLabel, 
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
-					Path: "/health",
-					Port: intstr.FromInt32(8000),
+					Path:   "/ready",
+					Port:   intstr.FromInt32(8000),
+					Scheme: corev1.URISchemeHTTP,
 				},
 			},
-			InitialDelaySeconds: 5,
+			InitialDelaySeconds: 2,
 			PeriodSeconds:       5,
 			TimeoutSeconds:      3,
 			SuccessThreshold:    1,
@@ -165,13 +168,14 @@ func CreateLlmdSimDeploymentWithGPU(namespace, deployName, modelName, appLabel, 
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
-					Path: "/health",
-					Port: intstr.FromInt32(8000),
+					Path:   "/health",
+					Port:   intstr.FromInt32(8000),
+					Scheme: corev1.URISchemeHTTP,
 				},
 			},
-			InitialDelaySeconds: 10,
+			InitialDelaySeconds: 5,
 			PeriodSeconds:       10,
-			TimeoutSeconds:      5,
+			TimeoutSeconds:      3,
 			SuccessThreshold:    1,
 			FailureThreshold:    3,
 		},
