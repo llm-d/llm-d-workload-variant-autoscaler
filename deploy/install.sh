@@ -780,11 +780,17 @@ deploy_llm_d_infrastructure() {
     #     -p '{"spec":{"kube":{"service":{"type":"NodePort"}}}}'
     # fi
 
-    # Patch llm-d-inference-simulator deployment if scale-to-zero is enabled and simulator is deployed
-    if [ "$ENABLE_SCALE_TO_ZERO" == "true" ] && kubectl get deployment gaie-sim-epp -n $LLMD_NS &>/dev/null; then
-        # Patch llm-d-inference-simulator deployment to use the correct image
+    # Patch llm-d-inference-simulator deployment if scale-to-zero is enabled
+    if [ "$ENABLE_SCALE_TO_ZERO" == "true" ]; then
+        # Patch llm-d-inference-scheduler deployment to use the correct image
         log_info "Patching llm-d-inference-simulator deployment to enable flowcontrol and use a new image"
-        export DEPLOYMENT_NAME="gaie-sim-epp"
+
+        if [ "$DEPLOY_LLM_D_INFERENCE_SIM" == "true" ]; then
+            export DEPLOYMENT_NAME="gaie-sim-epp"
+        else
+            export DEPLOYMENT_NAME="gaie-inference-scheduling-epp"
+        fi 
+
         export NEW_IMAGE="ghcr.io/llm-d/llm-d-inference-scheduler:v0.5.0-rc.1"
         kubectl patch deployment $DEPLOYMENT_NAME -n $LLMD_NS --type='json' -p='[
             {
