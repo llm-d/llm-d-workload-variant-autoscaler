@@ -814,6 +814,10 @@ deploy_llm_d_infrastructure() {
     kubectl wait --for=condition=Available deployment --all -n $LLMD_NS --timeout=60s || \
         log_warning "llm-d components are not ready yet - check 'kubectl get pods -n $LLMD_NS'"
 
+    
+    echo "DEPLOYMENT NAME: $DEPLOYMENT_NAME"
+    kubectl get deployment $DEPLOYMENT_NAME -n $LLMD_NS -o yaml
+
     # Deploy second model infrastructure for multi-model testing (limiter e2e tests)
     if [ "$MULTI_MODEL_TESTING" == "true" ]; then
         deploy_second_model_infrastructure
