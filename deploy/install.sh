@@ -781,17 +781,16 @@ deploy_llm_d_infrastructure() {
     # fi
 
     # Patch llm-d-inference-simulator deployment if scale-to-zero is enabled
-    if [ "$ENABLE_SCALE_TO_ZERO" == "true" ]; then
+    if [ "$ENABLE_SCALE_TO_ZERO" == "true" ] && kubectl get deployment gaie-sim-epp -n $LLMD_NS &>/dev/null; then
         # Patch llm-d-inference-scheduler deployment to use the correct image
         log_info "Patching llm-d-inference-simulator deployment to enable flowcontrol and use a new image"
 
-        # if [ "$DEPLOY_LLM_D_INFERENCE_SIM" == "true" ]; then
-        #     export DEPLOYMENT_NAME="gaie-sim-epp"
-        # else
-        #     export DEPLOYMENT_NAME="gaie-inference-scheduling-epp"
-        # fi 
+        if [ "$DEPLOY_LLM_D_INFERENCE_SIM" == "true" ]; then
+            export DEPLOYMENT_NAME="gaie-sim-epp"
+        else
+            export DEPLOYMENT_NAME="gaie-inference-scheduling-epp"
+        fi 
 
-        export DEPLOYMENT_NAME="gaie-$WELL_LIT_PATH_NAME-epp"
         export NEW_IMAGE="ghcr.io/llm-d/llm-d-inference-scheduler:v0.5.0-rc.1"
         kubectl patch deployment $DEPLOYMENT_NAME -n $LLMD_NS --type='json' -p='[
             {
@@ -814,7 +813,7 @@ deploy_llm_d_infrastructure() {
     kubectl wait --for=condition=Available deployment --all -n $LLMD_NS --timeout=60s || \
         log_warning "llm-d components are not ready yet - check 'kubectl get pods -n $LLMD_NS'"
 
-    
+
     echo "DEPLOYMENT NAME: $DEPLOYMENT_NAME"
     kubectl get deployment $DEPLOYMENT_NAME -n $LLMD_NS -o yaml
 
