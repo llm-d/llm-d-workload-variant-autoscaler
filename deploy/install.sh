@@ -64,7 +64,7 @@ INSTALL_GATEWAY_CTRLPLANE_ORIGINAL="${INSTALL_GATEWAY_CTRLPLANE:-}"
 INSTALL_GATEWAY_CTRLPLANE="${INSTALL_GATEWAY_CTRLPLANE:-false}"
 
 # Model and SLO Configuration
-DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-"Qwen/Qwen3-0.6B"}
+DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-"Qwen/Qwen3-32B"}
 MODEL_ID=${MODEL_ID:-"unsloth/Meta-Llama-3.1-8B"}
 ACCELERATOR_TYPE=${ACCELERATOR_TYPE:-"H100"}
 SLO_TPOT=${SLO_TPOT:-10}  # Target time-per-output-token SLO (in ms)
@@ -94,6 +94,8 @@ SKIP_CHECKS=${SKIP_CHECKS:-false}
 E2E_TESTS_ENABLED=${E2E_TESTS_ENABLED:-false}
 # vLLM max-num-seqs (max concurrent sequences per replica, lower = easier to saturate for testing)
 VLLM_MAX_NUM_SEQS=${VLLM_MAX_NUM_SEQS:-""}
+# Decode replicas override (useful for e2e testing with limited GPUs)
+DECODE_REPLICAS=${DECODE_REPLICAS:-""}
 
 # Environment-related variables
 SCRIPT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
@@ -737,7 +739,7 @@ deploy_llm_d_infrastructure() {
 
         # Increase model-storage volume size
         log_info "Increasing model-storage volume size for model: $MODEL_ID"
-        yq eval '.modelArtifacts.size = "30Gi"' -i "$LLM_D_MODELSERVICE_VALUES"
+        yq eval '.modelArtifacts.size = "100Gi"' -i "$LLM_D_MODELSERVICE_VALUES"
     fi
 
     # Configure llm-d-inference-simulator if needed
@@ -758,6 +760,12 @@ deploy_llm_d_infrastructure() {
       yq eval ".decode.containers[0].args += [\"--max-num-seqs=$VLLM_MAX_NUM_SEQS\"]" -i "$LLM_D_MODELSERVICE_VALUES"
     fi
 
+    # Configure decode replicas if set (useful for e2e testing with limited GPUs)
+    if [ -n "$DECODE_REPLICAS" ]; then
+      log_info "Setting decode replicas to $DECODE_REPLICAS"
+      yq eval ".decode.replicas = $DECODE_REPLICAS" -i "$LLM_D_MODELSERVICE_VALUES"
+    fi
+
     # Deploy llm-d core components
     log_info "Deploying llm-d core components"
     helmfile apply -e $GATEWAY_PROVIDER -n ${LLMD_NS}
@@ -772,8 +780,8 @@ deploy_llm_d_infrastructure() {
     #     -p '{"spec":{"kube":{"service":{"type":"NodePort"}}}}'
     # fi
 
-    # Patch llm-d-inference-simulator deployment if scale-to-zero is enabled
-    if [ "$ENABLE_SCALE_TO_ZERO" == "true" ]; then
+    # Patch llm-d-inference-simulator deployment if scale-to-zero is enabled and simulator is deployed
+    if [ "$ENABLE_SCALE_TO_ZERO" == "true" ] && kubectl get deployment gaie-sim-epp -n $LLMD_NS &>/dev/null; then
         # Patch llm-d-inference-simulator deployment to use the correct image
         log_info "Patching llm-d-inference-simulator deployment to enable flowcontrol and use a new image"
         export DEPLOYMENT_NAME="gaie-sim-epp"

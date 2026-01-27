@@ -475,6 +475,8 @@ jobs:
           CONTROLLER_INSTANCE: ${{ env.WVA_NAMESPACE }}
           # vLLM max-num-seqs for e2e testing (lower = easier to saturate)
           VLLM_MAX_NUM_SEQS: ${{ env.MAX_NUM_SEQS }}
+          # Decode replicas for e2e testing (start with 1 replica, let HPA scale)
+          DECODE_REPLICAS: "1"
         run: |
           echo "Deploying WVA and llm-d infrastructure..."
           echo "  MODEL_ID: $MODEL_ID"
@@ -485,6 +487,7 @@ jobs:
           echo "  WVA_IMAGE_TAG: $WVA_IMAGE_TAG"
           echo "  CONTROLLER_INSTANCE: $CONTROLLER_INSTANCE"
           echo "  VLLM_MAX_NUM_SEQS: $VLLM_MAX_NUM_SEQS"
+          echo "  DECODE_REPLICAS: $DECODE_REPLICAS"
           echo "  HF token configuration: ✓"
           ./deploy/install.sh --model "$MODEL_ID" --accelerator "$ACCELERATOR_TYPE" --release-name "$WVA_RELEASE_NAME" --environment openshift
 
@@ -530,11 +533,14 @@ jobs:
           DEPLOY_HPA: "false"
           # vLLM max-num-seqs for e2e testing (lower = easier to saturate)
           VLLM_MAX_NUM_SEQS: ${{ env.MAX_NUM_SEQS }}
+          # Decode replicas for e2e testing (start with 1 replica, let HPA scale)
+          DECODE_REPLICAS: "1"
         run: |
           echo "Deploying Model B infrastructure in $LLMD_NAMESPACE_B..."
           echo "  MODEL_ID: $MODEL_ID"
           echo "  ACCELERATOR_TYPE: $ACCELERATOR_TYPE"
           echo "  VLLM_MAX_NUM_SEQS: $VLLM_MAX_NUM_SEQS"
+          echo "  DECODE_REPLICAS: $DECODE_REPLICAS"
 
           # Deploy llm-d infrastructure only (no WVA controller, no VA/HPA)
           ./deploy/install.sh --model "$MODEL_ID" --accelerator "$ACCELERATOR_TYPE" --environment openshift
