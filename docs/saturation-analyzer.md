@@ -9,7 +9,6 @@ The Saturation Analyzer is a **fast, reactive, and safe saturation guardrail** t
 - ✅ Detects imminent capacity exhaustion (KV-cache or request queue)
 - ✅ Makes **per-variant** target replica calculations with cost-awareness
 - ✅ Uses ready replicas (those reporting metrics) to avoid excessive scale-up
-- ✅ **Prevents cascade scaling** by blocking scale-up when replicas are pending
 - ✅ Analyzes capacity across all variants of the same model
 
 ## Architecture
@@ -143,8 +142,6 @@ For each variant, determines target replicas based on **capacity needs**:
 
 **Note:** `readyReplicas` = number of replicas reporting capacity metrics. This prevents excessive scale-up when replicas are still starting up.
 
-**Cascade Scaling Prevention:** Variants with pending replicas (pods that exist but are not yet ready) are skipped during scale-up selection. This prevents the controller from repeatedly scaling up the same variant while previous scale-up operations are still in progress. Pod startup can take 2-7 minutes depending on model size and hardware (container initialization, model loading, health checks).
-
 **Example:**
 ```
 Model: llama-70b
@@ -159,7 +156,6 @@ Note: v2-a100 has 4 current replicas but only 3 are ready (reporting metrics).
 1. **Ready replicas only**: Use replicas reporting metrics to avoid scaling up for not-yet-ready pods
 2. **Cost-aware selection**: Cheapest variant for scale-up, most expensive for scale-down
 3. **Deterministic tie-breaking**: When variants have equal costs, alphabetically first for scale-up, last for scale-down
-4. **Pending replica awareness**: Skip variants with pending replicas during scale-up to prevent cascade scaling
 
 ## Multi-Variant Analysis
 
@@ -176,47 +172,6 @@ The analyzer aggregates across all 5 replicas and provides per-variant breakdown
 - If capacity allows scale-down: variant-1 (A100) will be scaled down (more expensive at $20)
 
 ## Configuration
-
-### Cascade Scaling Prevention
-
-**Problem:** Without pending replica awareness, the saturation analyzer could repeatedly trigger scale-up for the same variant before previous scale-up operations complete, leading to excessive replica counts.
-
-**Timeline Example (Without Protection):**
-```
-T+0s:  Saturation detected → Scale up variant-1 from 2 to 3 replicas
-T+30s: New pod created but not ready yet (still loading model)
-       Saturation still detected (only 2 ready replicas) → Scale up to 4 replicas
-T+60s: Both new pods still starting, saturation persists → Scale up to 5 replicas
-T+90s: All 5 pods now ready, but we have 3 extra replicas (over-provisioned)
-```
-
-**Solution:** WVA tracks **pending replicas** (total pods minus ready pods) per variant and skips variants with pending replicas during scale-up selection.
-
-**How It Works:**
-1. **Replica State Tracking**: Controller maintains variant state with:
-   - Total pods (from Deployment)
-   - Pods that exist but aren't ready (pending replicas)
-
-2. **Scale-Up Selection**: When saturation triggers scale-up:
-   - Skip variants with pending replicas (wait for them to become ready)
-   - Select the cheapest eligible variant
-
-3. **Per-Variant Tracking**: Each variant is tracked independently. If variant-1 has pending replicas, variant-2 can still scale up if it's the cheapest eligible variant.
-
-**Timeline Example (With Protection):**
-```
-T+0s:  Saturation detected → Scale up variant-1 from 2 to 3 (pending=1)
-T+30s: Saturation still detected, but variant-1 skipped (has 1 pending replica)
-       If variant-2 is cheaper and has no pending replicas → Scale up variant-2
-T+90s: variant-1 pod becomes ready (pending=0), now eligible for scale-up again
-```
-
-**Benefits:**
-- ✅ Prevents excessive scale-up during model loading periods (2-7 minutes)
-- ✅ Reduces infrastructure costs by avoiding over-provisioning
-- ✅ Maintains cost-optimized scaling across multiple variants
-
-**Note:** Scale-down operations are not affected by pending replicas, as removing capacity is always safe when replicas are starting up.
 
 Saturation scaling thresholds are configured via ConfigMap (see [saturation-scaling-config.md](saturation-scaling-config.md)):
 
@@ -315,7 +270,6 @@ The saturation analyzer is integrated into the controller's reconciliation loop:
 
 3. **Build variant states** with current replica counts
    - Current replicas: from actual pod count
-   - Pending replicas: pods that exist but aren't ready yet
 
 4. **Calculate capacity targets**
    - Uses cost-based selection (cheapest/most expensive) for capacity actions
