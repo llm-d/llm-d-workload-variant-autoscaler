@@ -785,12 +785,13 @@ deploy_llm_d_infrastructure() {
         # Patch llm-d-inference-scheduler deployment to use the correct image
         log_info "Patching llm-d-inference-simulator deployment to enable flowcontrol and use a new image"
 
-        if [ "$DEPLOY_LLM_D_INFERENCE_SIM" == "true" ]; then
-            export DEPLOYMENT_NAME="gaie-sim-epp"
-        else
-            export DEPLOYMENT_NAME="gaie-inference-scheduling-epp"
-        fi 
+        # if [ "$DEPLOY_LLM_D_INFERENCE_SIM" == "true" ]; then
+        #     export DEPLOYMENT_NAME="gaie-sim-epp"
+        # else
+        #     export DEPLOYMENT_NAME="gaie-inference-scheduling-epp"
+        # fi 
 
+        export DEPLOYMENT_NAME="gaie-$WELL_LIT_PATH_NAME-epp"
         export NEW_IMAGE="ghcr.io/llm-d/llm-d-inference-scheduler:v0.5.0-rc.1"
         kubectl patch deployment $DEPLOYMENT_NAME -n $LLMD_NS --type='json' -p='[
             {
