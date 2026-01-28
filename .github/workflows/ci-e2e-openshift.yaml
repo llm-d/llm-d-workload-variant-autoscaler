@@ -68,7 +68,7 @@ on:
       hpa_stabilization_seconds:
         description: 'HPA stabilization window in seconds'
         required: false
-        default: '30'
+        default: '240'
 
 jobs:
   # Gate: Check permissions and handle /ok-to-test for fork PRs
@@ -319,7 +319,7 @@ jobs:
       REQUEST_RATE: ${{ github.event.inputs.request_rate || '20' }}
       NUM_PROMPTS: ${{ github.event.inputs.num_prompts || '3000' }}
       MAX_NUM_SEQS: ${{ github.event.inputs.max_num_seqs || '1' }}
-      HPA_STABILIZATION_SECONDS: ${{ github.event.inputs.hpa_stabilization_seconds || '30' }}
+      HPA_STABILIZATION_SECONDS: ${{ github.event.inputs.hpa_stabilization_seconds || '240' }}
       SKIP_CLEANUP: ${{ github.event.inputs.skip_cleanup || 'false' }}
       # Use main branch of llm-d/llm-d for inferencepool chart v1.2.1 (GA API support)
       LLM_D_RELEASE: main
