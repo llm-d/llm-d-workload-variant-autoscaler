@@ -47,6 +47,7 @@ CONTROLLER_INSTANCE=${CONTROLLER_INSTANCE:-""}
 LLM_D_OWNER=${LLM_D_OWNER:-"llm-d"}
 LLM_D_PROJECT=${LLM_D_PROJECT:-"llm-d"}
 LLM_D_RELEASE=${LLM_D_RELEASE:-"v0.3.0"}
+LLM_D_EPP_NAME=${LLM_D_EPP_NAME:-"gaie-$WELL_LIT_PATH_NAME-epp"}
 LLM_D_MODELSERVICE_NAME=${LLM_D_MODELSERVICE_NAME:-"ms-$WELL_LIT_PATH_NAME-llm-d-modelservice"}
 CLIENT_PREREQ_DIR=${CLIENT_PREREQ_DIR:-"$WVA_PROJECT/$LLM_D_PROJECT/guides/prereq/client-setup"}
 GATEWAY_PREREQ_DIR=${GATEWAY_PREREQ_DIR:-"$WVA_PROJECT/$LLM_D_PROJECT/guides/prereq/gateway-provider"}
@@ -57,6 +58,9 @@ TTFT_AVERAGE_LATENCY_MS=${TTFT_AVERAGE_LATENCY_MS:-200}
 ENABLE_SCALE_TO_ZERO=${ENABLE_SCALE_TO_ZERO:-true}
 
 # Gateway Configuration
+# llm-d-inference scheduler with image with flowcontrol support
+# TODO: update once the llm-d-inference-scheduler v0.5.0 is released
+LLM_D_INFERENCE_SCHEDULER_IMG=${LLM_D_INFERENCE_SCHEDULER_IMG:-"ghcr.io/llm-d/llm-d-inference-scheduler:v0.5.0-rc.1"}
 GATEWAY_PROVIDER=${GATEWAY_PROVIDER:-"istio"} # Options: kgateway, istio
 BENCHMARK_MODE=${BENCHMARK_MODE:-"false"} # if true, updates to Istio config for benchmark (istioBench env required in helmfile)
 # Save original value to detect if explicitly set via environment variable
@@ -779,34 +783,30 @@ deploy_llm_d_infrastructure() {
     #     --type='merge' \
     #     -p '{"spec":{"kube":{"service":{"type":"NodePort"}}}}'
     # fi
-
-    # Patch llm-d-inference-simulator deployment if scale-to-zero is enabled
-    if [ "$ENABLE_SCALE_TO_ZERO" == "true" ] && kubectl get deployment gaie-sim-epp -n $LLMD_NS &>/dev/null; then
-        # Patch llm-d-inference-scheduler deployment to use the correct image
-        log_info "Patching llm-d-inference-simulator deployment to enable flowcontrol and use a new image"
-
-        if [ "$DEPLOY_LLM_D_INFERENCE_SIM" == "true" ]; then
-            export DEPLOYMENT_NAME="gaie-sim-epp"
-        else
-            export DEPLOYMENT_NAME="gaie-inference-scheduling-epp"
-        fi 
-
-        export NEW_IMAGE="ghcr.io/llm-d/llm-d-inference-scheduler:v0.5.0-rc.1"
-        kubectl patch deployment $DEPLOYMENT_NAME -n $LLMD_NS --type='json' -p='[
-            {
-                "op": "replace",
-                "path": "/spec/template/spec/containers/0/image",
-                "value": "'$NEW_IMAGE'"
-            },
-            {
-                "op": "add",
-                "path": "/spec/template/spec/containers/0/env/-",
-                "value": {
-                "name": "ENABLE_EXPERIMENTAL_FLOW_CONTROL_LAYER",
-                "value": "true"
+    
+    # Patch llm-d-inference-scheduler deployment if scale-to-zero is enabled
+    if [ "$ENABLE_SCALE_TO_ZERO" == "true" ]; then
+        # Patch llm-d-inference-scheduler to enable flowcontrol and use new image
+        log_info "Patching llm-d-inference-scheduler deployment to enable flowcontrol and use a new image"
+        if kubectl get deployment "$LLM_D_EPP_NAME" -n "$LLMD_NS" &> /dev/null; then
+            kubectl patch deployment "$LLM_D_EPP_NAME" -n "$LLMD_NS" --type='json' -p='[
+                {
+                    "op": "replace",
+                    "path": "/spec/template/spec/containers/0/image",
+                    "value": "'$LLM_D_INFERENCE_SCHEDULER_IMG'"
+                },
+                {
+                    "op": "add",
+                    "path": "/spec/template/spec/containers/0/env/-",
+                    "value": {
+                    "name": "ENABLE_EXPERIMENTAL_FLOW_CONTROL_LAYER",
+                    "value": "true"
+                    }
                 }
-            }
-        ]'
+            ]'
+        else
+            log_warning "Skipping inference-scheduler patch for SCALE_TO_ZERO: Deployment $LLM_D_EPP_NAME not found in $LLMD_NS"
+        fi
     fi
     
     log_info "Waiting for llm-d components to initialize..."
