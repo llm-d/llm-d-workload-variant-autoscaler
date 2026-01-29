@@ -8,7 +8,7 @@ The Saturation Analyzer is a **fast, reactive, and safe saturation guardrail** t
 - ✅ Operates from live vLLM metrics (no offline profiling required)
 - ✅ Detects imminent capacity exhaustion (KV-cache or request queue)
 - ✅ Makes **per-variant** target replica calculations with cost-awareness
-- ✅ Includes pending replicas to avoid excessive scale-up
+- ✅ Accounts for pending replicas when making scaling decisions to avoid excessive scale-up
 - ✅ Analyzes capacity across all variants of the same model
 
 ## Analysis Algorithm
