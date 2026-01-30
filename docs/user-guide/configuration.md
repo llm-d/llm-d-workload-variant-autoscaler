@@ -152,7 +152,7 @@ env:
 
 **Recommendation:** Stick with CAPACITY-ONLY mode unless you have specific proactive scaling requirements.
 
-See [Saturation Analyzer Documentation](../../docs/saturation-analyzer.md) for configuration details.
+See [Saturation Analyzer Documentation](../saturation-analyzer.md) for configuration details.
 
 ## ConfigMaps
 
