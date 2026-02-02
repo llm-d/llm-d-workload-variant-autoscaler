@@ -22,8 +22,6 @@ Scale-to-zero automatically scales model deployments to zero replicas after a co
 3. **Scales to zero** when no requests are received within the retention period
 4. **Preserves minimum replicas** for models with scale-to-zero disabled
 
-> **Note**: Scale-to-zero works together with the [Scale-from-Zero](scale-from-zero.md) feature, which automatically scales models back up when new requests arrive. Together, they provide complete lifecycle management for idle workloads.
-
 ## How It Works
 
 ### Scaling Pipeline
@@ -134,7 +132,7 @@ data:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enable_scale_to_zero` | boolean | `false` | Enable automatic scaling to zero for idle models |
-| `retention_period` | string | `"10m"` | Duration of inactivity before scaling to zero (e.g., "5m", "1h", "30s") |
+| `retention_period` | string | `"10m"` | Duration of inactivity before scaling to zero (e.g., "5m", "1h", "30s"). Note: This is unrelated to HPA's `stabilizationWindowSeconds` - retention period tracks how long a model has no requests, while stabilizationWindowSeconds prevents HPA flapping after scaling decisions |
 | `model_id` | string | - | Model identifier for per-model overrides (required for non-default entries) |
 | `namespace` | string | - | Namespace scope for per-model overrides. When specified, the override only applies to the model in that specific namespace. This is important when the same model is deployed in multiple namespaces with different requirements |
 
@@ -368,14 +366,13 @@ status:
 
 ### Model Not Scaling Back Up
 
-Scale-up from zero is handled by the **Scale-from-Zero** feature, which monitors the EPP (End Point Picker) queue for pending requests and automatically triggers scale-up when traffic arrives. See [Scale from Zero](scale-from-zero.md) for detailed documentation.
+Scale-up from zero requires the EPP (End Point Picker) queue metrics to trigger when traffic arrives.
 
 If scale-up isn't working:
 
-1. **Verify Scale-from-Zero is enabled**: Check controller configuration
-2. **Verify EPP queue metrics are available**: The feature monitors `inference_extension_flow_control_queue_size` metric
-3. **Check saturation configuration**: See [Saturation Scaling Configuration](../saturation-scaling-config.md)
-4. **Verify HPA is receiving external metrics**: Check `kubectl get --raw "/apis/external.metrics.k8s.io/v1beta1"`
+1. **Verify EPP queue metrics are available**: The controller monitors `inference_extension_flow_control_queue_size` metric
+2. **Check saturation configuration**: See [Saturation Scaling Configuration](../saturation-scaling-config.md)
+3. **Verify HPA is receiving external metrics**: Check `kubectl get --raw "/apis/external.metrics.k8s.io/v1beta1"`
 
 ## Best Practices
 
@@ -393,13 +390,11 @@ If scale-up isn't working:
 
 ## Limitations
 
-- **Cold start latency**: Scaling from zero requires loading the model, which can take several minutes for large models
 - **Metrics dependency**: Requires Prometheus metrics to be available; metrics unavailability prevents scale-to-zero (safety mechanism)
 - **No predictive scaling**: Scale-to-zero is reactive, not predictive - it cannot anticipate traffic spikes
 - **Single retention period per model**: Cannot configure different retention periods for different time windows (e.g., shorter during business hours)
 
 ## Related Documentation
 
-- [Scale from Zero](scale-from-zero.md) - Automatic scale-up when requests arrive for models at zero replicas
 - [Saturation Scaling Configuration](../saturation-scaling-config.md) - Configure saturation thresholds for scaling behavior
 - [GPU Limiter](gpu-limiter.md) - Resource-aware scaling constraints applied after scale-to-zero enforcement
