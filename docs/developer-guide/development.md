@@ -359,7 +359,7 @@ See [Agentic Workflows Guide](agentic-workflows.md) for detailed information on 
 
 ## Release Process
 
-See [Releasing Guide](releasing.md) (coming soon) for the release process.
+See [Releasing Guide](releasing.md) for the release process.
 
 ## Getting Help
 
