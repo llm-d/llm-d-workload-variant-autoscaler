@@ -5,7 +5,8 @@ By benchmarking the HPA first, we establish a baseline for how a general-purpose
 
 $$DesiredReplicas = \lceil CurrentReplicas \times \frac{CurrentMetricValue}{TargetValue} \rceil$$
 
-It treats all pods in a deployment as identical units. It calculates a global average of the target metric across all pods and scales up or down to keep that average near the target.
+It treats all pods in a deployment as identical units. It calculates a global average of the target metric across all pods and scales up or down to keep that average near the target. For object metrics and external metrics, a single metric is fetched, which describes the object in question. This metric is compared to the target value, to produce a ratio as above. In the autoscaling/v2 API version, this value can optionally be divided by the number of Pods before the comparison is made.
+
 
 **Metrics:** We focus on the two most common HPA thresholds (see for instance https://docs.cloud.google.com/kubernetes-engine/docs/best-practices/machine-learning/inference/autoscaling). These metrics are also used by saturation based wva, enabling a fair comparison between the two.
 
