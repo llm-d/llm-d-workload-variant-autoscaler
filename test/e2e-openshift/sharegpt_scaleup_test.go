@@ -541,7 +541,7 @@ exit 1`,
 					if hpaMetricSelector != "" {
 						if result, qErr := k8sClient.RESTClient().
 							Get().
-							AbsPath("/apis/external.metrics.k8s.io/v1beta1/namespaces/" + model.namespace + "/" + constants.WVADesiredReplicas).
+							AbsPath("/apis/external.metrics.k8s.io/v1beta1/namespaces/"+model.namespace+"/"+constants.WVADesiredReplicas).
 							Param("labelSelector", hpaMetricSelector).
 							DoRaw(ctx); qErr == nil {
 							// Parse the metric value from the JSON response rather than truncating the raw JSON
