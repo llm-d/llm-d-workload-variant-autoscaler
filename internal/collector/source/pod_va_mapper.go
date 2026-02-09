@@ -9,7 +9,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/indexers"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/controller/indexers"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/logging"
 )
 
