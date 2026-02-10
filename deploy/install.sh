@@ -732,7 +732,18 @@ deploy_llm_d_infrastructure() {
     # Update model ID if different from default
     if [ "$MODEL_ID" != "$DEFAULT_MODEL_ID" ] ; then
         log_info "Updating deployment to use model: $MODEL_ID"
+
+        # Extract the model name to use in labels ("unsloth/Meta-Llama-3.1-8B" -> "Meta-Llama-3.1-8B")
+        MODEL_NAME="${MODEL_ID##*/}"
+
+        # Update model name and URI in the values file
         yq eval "(.. | select(. == \"$DEFAULT_MODEL_ID\")) = \"$MODEL_ID\" | (.. | select(. == \"hf://$DEFAULT_MODEL_ID\")) = \"hf://$MODEL_ID\"" -i "$LLM_D_MODELSERVICE_VALUES"
+
+        # If present, update the model label using the model name
+        if [ "$(yq eval '.modelArtifacts.labels."llm-d.ai/model"' "$LLM_D_MODELSERVICE_VALUES" 2>/dev/null)" != "null" ]; then
+            log_info "Updating 'llm-d.ai/model' label to: $MODEL_NAME"
+            yq eval '.modelArtifacts.labels."llm-d.ai/model" = "'"$MODEL_NAME"'"' -i "$LLM_D_MODELSERVICE_VALUES"
+        fi
 
         # Increase model-storage volume size
         log_info "Increasing model-storage volume size for model: $MODEL_ID"
