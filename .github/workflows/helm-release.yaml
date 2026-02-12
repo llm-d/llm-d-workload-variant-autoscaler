@@ -149,8 +149,22 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           CHART_FILE="workload-variant-autoscaler-${VERSION}.tgz"
 
+          # Push to org-level path to avoid nested sub-package (slashes in
+          # GHCR package names prevent visibility changes via API/UI).
           helm push "$CHART_FILE" \
-            oci://ghcr.io/llm-d/llm-d-workload-variant-autoscaler
+            oci://ghcr.io/llm-d
+
+      # -----------------------------------------
+      # 10b. Ensure Helm chart package is public
+      # -----------------------------------------
+      - name: Set Helm chart package visibility to public
+        env:
+          GH_TOKEN: ${{ secrets.CR_TOKEN }}
+        run: |
+          gh api --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "/orgs/${{ github.repository_owner }}/packages/container/workload-variant-autoscaler" \
+            -f visibility='public' || echo "::warning::Could not set chart package to public — may need manual update"
 
       # -----------------------------------------
       # 11. Commit updated chart files
