@@ -1,5 +1,5 @@
 # Canonical pre-commit configuration for llm-d repos
-# Copy this file to the root of your repo
+# Based on template from llm-d/llm-d-infra
 #
 # Install: pip install pre-commit && pre-commit install
 # Run all: pre-commit run --all-files

@@ -1,0 +1,18 @@
+# Typos configuration for llm-d-workload-variant-autoscaler
+# https://github.com/crate-ci/typos
+
+[default.extend-words]
+# Intentional Go struct field names (ServiceParms, PrefillParms, DecodeParms)
+Parms = "Parms"
+parms = "parms"
+# Short code fragments / false positives
+ot = "ot"
+vas = "vas"
+
+# Pre-existing typos in codebase (to be fixed separately)
+accelarator = "accelarator"
+correcly = "correcly"
+coule = "coule"
+preformance = "preformance"
+servive = "servive"
+throughtput = "throughtput"
