@@ -29,7 +29,7 @@ on:
       image_tag:
         description: 'WVA image tag (default: latest released)'
         required: false
-        default: 'v0.5.0'
+        default: 'v0.5.1'
       request_rate:
         description: 'Request rate (req/s)'
         required: false
@@ -62,7 +62,7 @@ jobs:
       MAX_NUM_SEQS: ${{ github.event.inputs.max_num_seqs || '1' }}
       HPA_STABILIZATION_SECONDS: ${{ github.event.inputs.hpa_stabilization_seconds || '240' }}
       SKIP_CLEANUP: ${{ github.event.inputs.skip_cleanup || 'false' }}
-      WVA_IMAGE_TAG: ${{ github.event.inputs.image_tag || 'v0.5.0' }}
+      WVA_IMAGE_TAG: ${{ github.event.inputs.image_tag || 'v0.5.1' }}
       # Use main branch of llm-d/llm-d for latest charts
       LLM_D_RELEASE: main
       # Fixed namespaces for nightly (not PR-specific)
@@ -257,9 +257,13 @@ jobs:
       - name: Wait for infrastructure to be ready
         run: |
           echo "Waiting for WVA controller to be ready..."
-          kubectl wait --for=condition=available --timeout=300s deployment -l app.kubernetes.io/name=workload-variant-autoscaler -n "$WVA_NAMESPACE" || true
+          kubectl wait --for=condition=available --timeout=300s deployment -l app.kubernetes.io/name=workload-variant-autoscaler -n "$WVA_NAMESPACE"
+          echo "WVA controller pods:"
           kubectl get pods -n "$WVA_NAMESPACE"
-          echo "Waiting for llm-d deployment to be ready..."
+
+          echo "Waiting for llm-d deployments to be ready..."
+          kubectl wait --for=condition=available --timeout=600s deployment --all -n "$LLMD_NAMESPACE"
+          echo "llm-d pods:"
           kubectl get pods -n "$LLMD_NAMESPACE"
 
       - name: Install Go dependencies
