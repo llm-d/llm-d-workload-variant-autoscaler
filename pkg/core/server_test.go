@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/config"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/config"
 )
 
 func TestNewServerFromSpec(t *testing.T) {

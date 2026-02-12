@@ -298,7 +298,7 @@ on:
   pull_request:
     forks: ["*"]  # Allow all forks
     # or
-    forks: ["llm-d-incubation/*"]  # Allow organization forks only
+    forks: ["llm-d/*"]  # Allow organization forks only
 ```
 
 ### Manual Approval

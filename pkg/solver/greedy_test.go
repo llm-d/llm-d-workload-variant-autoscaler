@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/config"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/core"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/config"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/core"
 )
 
 // Helper function to create a basic system for testing

@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
 
-	testutils "github.com/llm-d-incubation/workload-variant-autoscaler/test/utils"
+	testutils "github.com/llm-d/llm-d-workload-variant-autoscaler/test/utils"
 )
 
 func TestQueryPrometheusWithBackoff(t *testing.T) {

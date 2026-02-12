@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	unittestutil "github.com/llm-d-incubation/workload-variant-autoscaler/test/utils"
+	unittestutil "github.com/llm-d/llm-d-workload-variant-autoscaler/test/utils"
 	"github.com/stretchr/testify/require"
 	appsV1 "k8s.io/api/apps/v1"
 	autoscalingapi "k8s.io/api/autoscaling/v1"

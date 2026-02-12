@@ -30,7 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/test/utils"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/test/utils"
 )
 
 var (
@@ -49,7 +49,7 @@ var (
 
 	// projectImage is the name of the image which will be build and loaded
 	// with the code source changes to be tested.
-	projectImage = "ghcr.io/llm-d-incubation/workload-variant-autoscaler:0.0.1-test"
+	projectImage = "ghcr.io/llm-d/llm-d-workload-variant-autoscaler:0.0.1-test"
 
 	MinimumReplicas = 1
 )

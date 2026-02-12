@@ -10,7 +10,7 @@ import (
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
 
-	sourcepkg "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
+	sourcepkg "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector/source"
 )
 
 // mockPrometheusAPI implements promv1.API for testing

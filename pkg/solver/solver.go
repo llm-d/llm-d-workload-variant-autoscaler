@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/config"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/core"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/config"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/core"
 )
 
 // Solver of allocation assignment problem

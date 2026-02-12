@@ -244,7 +244,7 @@ E2E tests updated:
 
 ## References
 
-- PR #549: https://github.com/llm-d-incubation/workload-variant-autoscaler/pull/549
+- PR #549: https://github.com/llm-d/llm-d-workload-variant-autoscaler/pull/549
 - Commit: 14e2bd88 - fix: pending-aware scaling and E2E test stability improvements
 
 ---

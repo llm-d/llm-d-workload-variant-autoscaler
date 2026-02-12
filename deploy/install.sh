@@ -30,7 +30,7 @@ WVA_NS=${WVA_NS:-"workload-variant-autoscaler-system"}
 PROMETHEUS_SECRET_NS=${PROMETHEUS_SECRET_NS:-$MONITORING_NAMESPACE}
 
 # WVA Configuration
-WVA_IMAGE_REPO=${WVA_IMAGE_REPO:-"ghcr.io/llm-d-incubation/workload-variant-autoscaler"}
+WVA_IMAGE_REPO=${WVA_IMAGE_REPO:-"ghcr.io/llm-d/llm-d-workload-variant-autoscaler"}
 WVA_IMAGE_TAG=${WVA_IMAGE_TAG:-"latest"}
 WVA_IMAGE_PULL_POLICY=${WVA_IMAGE_PULL_POLICY:-"Always"}
 WVA_RELEASE_NAME=${WVA_RELEASE_NAME:-"workload-variant-autoscaler"}

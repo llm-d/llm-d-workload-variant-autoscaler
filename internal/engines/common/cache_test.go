@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	interfaces "github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
+	interfaces "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
 )
 
 func TestInternalDecisionCache(t *testing.T) {

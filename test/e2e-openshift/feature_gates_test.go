@@ -5,7 +5,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/test/utils"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/test/utils"
 )
 
 // isHPAScaleToZeroEnabled is a package-level wrapper for the shared utility function.

@@ -65,7 +65,7 @@ export HF_TOKEN="your-hf-token-here"
 
 # Optional: Customize deployment
 export MODEL_ID="unsloth/Meta-Llama-3.1-8B"         # Default
-export WVA_IMAGE="ghcr.io/llm-d-incubation/workload-variant-autoscaler:latest"  # Default
+export WVA_IMAGE="ghcr.io/llm-d/llm-d-workload-variant-autoscaler:latest"  # Default
 ```
 
 ### 2. Deploy the Workload Variant Autoscaler and llm-d using Make

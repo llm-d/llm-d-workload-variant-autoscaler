@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source/pod"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/config"
-	poolutil "github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils/pool"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector/source"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector/source/pod"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/config"
+	poolutil "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils/pool"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 

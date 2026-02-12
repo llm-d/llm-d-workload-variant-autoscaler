@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	unittestutil "github.com/llm-d-incubation/workload-variant-autoscaler/test/utils"
+	unittestutil "github.com/llm-d/llm-d-workload-variant-autoscaler/test/utils"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"

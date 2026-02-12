@@ -19,7 +19,7 @@ package actuator
 import (
 	"context"
 
-	poolutil "github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils/pool"
+	poolutil "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils/pool"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

@@ -3,8 +3,8 @@ package solver
 import (
 	"testing"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/config"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/core"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/config"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/core"
 )
 
 func TestNewOptimizer(t *testing.T) {

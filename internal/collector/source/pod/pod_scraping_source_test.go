@@ -15,7 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	sourcepkg "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
+	sourcepkg "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector/source"
 )
 
 var _ = Describe("PodScrapingSource", func() {

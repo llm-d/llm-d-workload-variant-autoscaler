@@ -178,17 +178,17 @@ Note: v2-a100 has 4 current replicas but only 3 are ready (reporting metrics).
 ```go
 import (
     "context"
-    "github.com/llm-d-incubation/workload-variant-autoscaler/internal/capacity"
-    controller "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector"
-    "github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
+    "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/saturation"
+    "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector"
+    "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
 )
 
 // Create analyzer
-analyzer := capacity.NewAnalyzer()
+analyzer := saturation.NewAnalyzer()
 
 // Collect metrics (uses max_over_time[1m] for safety-first analysis)
 // Note: Cost should be populated from CRD spec (default 10)
-metricsCollector := controller.NewCapacityMetricsCollector(promAPI)
+metricsCollector := collector.NewReplicaMetricsCollector(metricsSource, k8sClient)
 replicaMetrics, err := metricsCollector.CollectReplicaMetrics(ctx, modelID, namespace)
 
 // Get capacity config

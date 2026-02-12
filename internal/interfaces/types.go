@@ -1,6 +1,6 @@
 package interfaces
 
-import inferno "github.com/llm-d-incubation/workload-variant-autoscaler/pkg/core"
+import inferno "github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/core"
 
 // Captures response from ModelAnalyzer(s) per model
 type ModelAnalyzeResponse struct {

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
 )
 
 // SaturationAnalyzer implements the interfaces.Analyzer interface using a

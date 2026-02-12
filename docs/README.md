@@ -64,7 +64,7 @@ Contributing to WVA:
 ## Need Help?
 
 - Check the [FAQ](user-guide/faq.md) (coming soon)
-- Open a [GitHub Issue](https://github.com/llm-d-incubation/workload-variant-autoscaler/issues)
+- Open a [GitHub Issue](https://github.com/llm-d/llm-d-workload-variant-autoscaler/issues)
 - Join community meetings
 
 ---

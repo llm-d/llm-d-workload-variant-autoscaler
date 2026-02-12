@@ -3,10 +3,10 @@ package modelanalyzer
 import (
 	"context"
 
-	llmdOptv1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
-	interfaces "github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils"
-	inferno "github.com/llm-d-incubation/workload-variant-autoscaler/pkg/core"
+	llmdOptv1alpha1 "github.com/llm-d/llm-d-workload-variant-autoscaler/api/v1alpha1"
+	interfaces "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils"
+	inferno "github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/core"
 )
 
 // Performance analyzer of queueing models associated with variant servers

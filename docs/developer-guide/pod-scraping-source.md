@@ -38,7 +38,7 @@ import (
     
     "sigs.k8s.io/controller-runtime/pkg/client"
     
-    "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source/pod"
+    "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector/source/pod"
 )
 ```
 
@@ -292,8 +292,8 @@ When scraping EPP pods, you'll find metrics from the [Gateway API Inference Exte
 
 ```go
 import (
-    "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source"
-    "github.com/llm-d-incubation/workload-variant-autoscaler/internal/collector/source/pod"
+    "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector/source"
+    "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector/source/pod"
 )
 
 // Create source

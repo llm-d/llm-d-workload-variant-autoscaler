@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/datastore"
-	poolutils "github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils/pool"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/datastore"
+	poolutils "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils/pool"
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"

@@ -17,8 +17,8 @@ Guide for developers contributing to Workload-Variant-Autoscaler.
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/llm-d-incubation/workload-variant-autoscaler.git
-   cd workload-variant-autoscaler
+   git clone https://github.com/llm-d/llm-d-workload-variant-autoscaler.git
+   cd llm-d-workload-variant-autoscaler
    ```
 
 2. **Install dependencies:**
@@ -406,4 +406,4 @@ make create-kind-cluster
 ## Next Steps
 
 - Review [Code Style Guidelines](../../CONTRIBUTING.md#coding-guidelines)
-- Check out [Good First Issues](https://github.com/llm-d-incubation/workload-variant-autoscaler/labels/good%20first%20issue)
+- Check out [Good First Issues](https://github.com/llm-d/llm-d-workload-variant-autoscaler/labels/good%20first%20issue)

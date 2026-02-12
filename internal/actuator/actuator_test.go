@@ -20,9 +20,9 @@ import (
 	"context"
 	"fmt"
 
-	llmdVariantAutoscalingV1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/metrics"
-	ctrlutils "github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils"
+	llmdVariantAutoscalingV1alpha1 "github.com/llm-d/llm-d-workload-variant-autoscaler/api/v1alpha1"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/metrics"
+	ctrlutils "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"

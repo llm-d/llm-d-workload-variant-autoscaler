@@ -161,7 +161,7 @@ export K8S_VERSION=v1.31.0
 make test-e2e
 
 # Use custom controller image
-export IMG=ghcr.io/llm-d-incubation/workload-variant-autoscaler:dev
+export IMG=ghcr.io/llm-d/llm-d-workload-variant-autoscaler:dev
 make test-e2e
 ```
 
@@ -296,7 +296,7 @@ kubectl get nodes
 
 ```bash
 # Build image manually
-make docker-build IMG=ghcr.io/llm-d-incubation/workload-variant-autoscaler:0.0.1-test
+make docker-build IMG=ghcr.io/llm-d/llm-d-workload-variant-autoscaler:0.0.1-test
 
 # Verify image exists
 docker images | grep workload-variant-autoscaler

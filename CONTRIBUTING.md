@@ -28,7 +28,7 @@ This document covers **WVA-specific** development setup and workflows.
 
 2. **Add upstream remote:**
    ```bash
-   git remote add upstream https://github.com/llm-d-incubation/workload-variant-autoscaler.git
+   git remote add upstream https://github.com/llm-d/llm-d-workload-variant-autoscaler.git
    ```
 
 3. **Install dependencies:**
@@ -229,7 +229,7 @@ When modifying solvers in `pkg/solver/`:
 
 - Check [Developer Guide](docs/developer-guide/development.md)
 - Review existing code and tests
-- Search [GitHub Issues](https://github.com/llm-d-incubation/workload-variant-autoscaler/issues)
+- Search [GitHub Issues](https://github.com/llm-d/llm-d-workload-variant-autoscaler/issues)
 - Ask in GitHub Discussions
 - Attend llm-d community meetings
 

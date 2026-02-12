@@ -357,4 +357,4 @@ If you're still experiencing issues after following this guide:
 
 1. **Check the logs:** Controller logs often contain detailed error messages
 2. **Review the status:** Use `kubectl describe va` to see status conditions and events
-3. **Open an issue:** Report bugs or request help at [GitHub Issues](https://github.com/llm-d-incubation/workload-variant-autoscaler/issues)
+3. **Open an issue:** Report bugs or request help at [GitHub Issues](https://github.com/llm-d/llm-d-workload-variant-autoscaler/issues)

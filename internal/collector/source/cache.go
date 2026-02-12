@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/logging"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/logging"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 

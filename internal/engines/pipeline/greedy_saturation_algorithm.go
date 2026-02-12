@@ -4,7 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
 )
 
 // GreedyBySaturation allocates resources to the most saturated variants first.

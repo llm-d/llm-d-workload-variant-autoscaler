@@ -1,10 +1,10 @@
 # Workload-Variant-Autoscaler (WVA)
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/llm-d-incubation/workload-variant-autoscaler)](https://goreportcard.com/report/github.com/llm-d-incubation/workload-variant-autoscaler)
+[![Go Report Card](https://goreportcard.com/badge/github.com/llm-d/llm-d-workload-variant-autoscaler)](https://goreportcard.com/report/github.com/llm-d/llm-d-workload-variant-autoscaler)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 
-The Workload Variant Autoscaler (WVA) is a Kubernetes-based global autoscaler for inference model servers serving LLMs. WVA works alongside standard Kubernetes HPA autoscaler and external autoscalers like KEDA to scale the object supporting scale subresource. The high-level details of the algorithm are [here](https://github.com/llm-d-incubation/workload-variant-autoscaler/blob/main/docs/saturation-scaling-config.md ). It determines optimal replica counts for given request traffic loads for inference servers by considering constraints such as GPU count (cluster resources), energy-budget and performance-budget (latency/throughput).
+The Workload Variant Autoscaler (WVA) is a Kubernetes-based global autoscaler for inference model servers serving LLMs. WVA works alongside standard Kubernetes HPA autoscaler and external autoscalers like KEDA to scale the object supporting scale subresource. The high-level details of the algorithm are [here](https://github.com/llm-d/llm-d-workload-variant-autoscaler/blob/main/docs/saturation-scaling-config.md ). It determines optimal replica counts for given request traffic loads for inference servers by considering constraints such as GPU count (cluster resources), energy-budget and performance-budget (latency/throughput).
 <!--
 <![Architecture](docs/design/diagrams/inferno-WVA-design.png)>
 -->

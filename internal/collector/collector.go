@@ -18,7 +18,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/discovery"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/discovery"
 )
 
 type AcceleratorModelInfo = discovery.AcceleratorModelInfo

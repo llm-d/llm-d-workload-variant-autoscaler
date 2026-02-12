@@ -1,8 +1,8 @@
 package modelanalyzer
 
 import (
-	interfaces "github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
-	inferno "github.com/llm-d-incubation/workload-variant-autoscaler/pkg/core"
+	interfaces "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
+	inferno "github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/core"
 )
 
 // Adapter from inferno allocations to a model analyzer response

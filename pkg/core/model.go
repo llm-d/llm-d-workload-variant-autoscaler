@@ -3,7 +3,7 @@ package core
 import (
 	"fmt"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/config"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/config"
 )
 
 // An inference model

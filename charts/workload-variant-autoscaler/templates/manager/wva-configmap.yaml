@@ -100,7 +100,7 @@ data:
   # END OF CONFIGURATION
   # ============================================================================
   # For more information about immutable vs mutable parameters, see:
-  # https://github.com/llm-d-incubation/workload-variant-autoscaler/blob/main/docs/user-guide/configuration.md#unified-configuration-system
+  # https://github.com/llm-d/llm-d-workload-variant-autoscaler/blob/main/docs/user-guide/configuration.md#unified-configuration-system
   #
   # IMMUTABLE CONFIGMAP:
   # If wva.configMap.immutable is set to true, this ConfigMap becomes immutable

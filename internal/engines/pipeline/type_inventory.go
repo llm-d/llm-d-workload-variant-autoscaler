@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/discovery"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/discovery"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
 )
 
 // normalizeAcceleratorName converts a full GPU model name to a short name.

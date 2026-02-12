@@ -50,7 +50,7 @@ package pipeline
 import (
 	"context"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
 )
 
 // Limiter constrains scaling decisions based on resource availability.

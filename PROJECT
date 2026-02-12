@@ -6,7 +6,7 @@ domain: ai
 layout:
 - go.kubebuilder.io/v4
 projectName: workload-variant-autoscaler
-repo: github.com/llm-d-incubation/workload-variant-autoscaler
+repo: github.com/llm-d/llm-d-workload-variant-autoscaler
 resources:
 - api:
     crdVersion: v1
@@ -15,6 +15,6 @@ resources:
   domain: ai
   group: llmd
   kind: VariantAutoscaling
-  path: github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1
+  path: github.com/llm-d/llm-d-workload-variant-autoscaler/api/v1alpha1
   version: v1alpha1
 version: "3"

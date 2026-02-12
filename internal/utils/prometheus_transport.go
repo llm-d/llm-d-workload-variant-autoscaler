@@ -9,8 +9,8 @@ import (
 	"github.com/prometheus/client_golang/api"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	interfaces "github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/logging"
+	interfaces "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/logging"
 )
 
 // CreatePrometheusTransport creates a custom HTTPS transport for Prometheus client with TLS support.

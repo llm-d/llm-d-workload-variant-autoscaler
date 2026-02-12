@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	interfaces "github.com/llm-d-incubation/workload-variant-autoscaler/internal/interfaces"
+	interfaces "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
 )
 
 // TestConfig_ThreadSafeUpdates tests that concurrent reads and writes to DynamicConfig

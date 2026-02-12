@@ -1,4 +1,4 @@
-module github.com/llm-d-incubation/workload-variant-autoscaler
+module github.com/llm-d/llm-d-workload-variant-autoscaler
 
 go 1.24.0
 

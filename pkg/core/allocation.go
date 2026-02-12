@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/analyzer"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/config"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/analyzer"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/config"
 )
 
 // Allocation details of an accelerator to a server

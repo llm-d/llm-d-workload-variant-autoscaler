@@ -1,8 +1,8 @@
 package manager
 
 import (
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/core"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/pkg/solver"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/core"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/pkg/solver"
 )
 
 type Manager struct {

@@ -21,9 +21,9 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/datastore"
-	poolutil "github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils/pool"
-	unittestutil "github.com/llm-d-incubation/workload-variant-autoscaler/test/utils"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/datastore"
+	poolutil "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils/pool"
+	unittestutil "github.com/llm-d/llm-d-workload-variant-autoscaler/test/utils"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"

@@ -31,7 +31,7 @@ Helm chart for Workload-Variant-Autoscaler (WVA) - GPU-aware autoscaler for LLM 
 | wva.configMap.immutable | bool | `false` | If true, makes the main controller ConfigMap (`{release-name}-variantautoscaling-config`) immutable (cannot be updated after creation). Provides security benefits by preventing accidental or malicious configuration changes, but disables runtime config updates. Note: This only affects the main ConfigMap; other ConfigMaps (saturation scaling, scale-to-zero) are not affected. See [Configuration Guide](../../docs/user-guide/configuration.md) |
 | wva.controllerInstance | string | `""` | Controller instance label for multi-controller isolation. When set, adds `controller_instance` label to all metrics and filters VariantAutoscaling resources by matching label. Use for parallel testing or multi-tenant environments. See [Multi-Controller Isolation](../../docs/user-guide/multi-controller-isolation.md) |
 | wva.enabled | bool | `true` |  |
-| wva.image.repository | string | `"ghcr.io/llm-d-incubation/workload-variant-autoscaler"` |  |
+| wva.image.repository | string | `"ghcr.io/llm-d/llm-d-workload-variant-autoscaler"` |  |
 | wva.image.tag | string | `"latest"` |  |
 | wva.imagePullPolicy | string | `"Always"` |  |
 | wva.metrics.enabled | bool | `true` |  |
@@ -57,8 +57,8 @@ helm ls -A
 ```
 
 ```
-export OWNER="llm-d-incubation"
-export WVA_PROJECT="workload-variant-autoscaler"
+export OWNER="llm-d"
+export WVA_PROJECT="llm-d-workload-variant-autoscaler"
 export WVA_RELEASE="v0.4.1"
 export WVA_NS="workload-variant-autoscaler-system"
 export MON_NS="openshift-user-workload-monitoring"

@@ -41,7 +41,7 @@ The ScaleFromZero engine continuously monitors inactive VariantAutoscaling resou
 
 ## Prerequisites
 
-- WVA and llm-d installed and running - deployment options available for [kind](https://github.com/llm-d-incubation/workload-variant-autoscaler/blob/main/deploy/kind-emulator/README.md), [OpenShift](https://github.com/llm-d-incubation/workload-variant-autoscaler/blob/main/deploy/openshift/README.md) and [Kubernetes](https://github.com/llm-d-incubation/workload-variant-autoscaler/blob/main/deploy/kubernetes/README.md)
+- WVA and llm-d installed and running - deployment options available for [kind](https://github.com/llm-d/llm-d-workload-variant-autoscaler/blob/main/deploy/kind-emulator/README.md), [OpenShift](https://github.com/llm-d/llm-d-workload-variant-autoscaler/blob/main/deploy/openshift/README.md) and [Kubernetes](https://github.com/llm-d/llm-d-workload-variant-autoscaler/blob/main/deploy/kubernetes/README.md)
 - EndpointPicker (EPP) configured with flowcontrol enabled - required for queue metrics collection (set EPP env variable `ENABLE_EXPERIMENTAL_FLOW_CONTROL_LAYER`)
 
 

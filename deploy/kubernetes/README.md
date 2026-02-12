@@ -64,7 +64,7 @@ export HF_TOKEN="your-hf-token-here"
 # Optional: Customize deployment
 export WELL_LIT_PATH_NAME="inference-scheduler"                           # Default
 export MODEL_ID="unsloth/Meta-Llama-3.1-8B"                               # Default
-export WVA_IMAGE_REPO="ghcr.io/llm-d-incubation/workload-variant-autoscaler"         # Default
+export WVA_IMAGE_REPO="ghcr.io/llm-d/llm-d-workload-variant-autoscaler"         # Default
 export WVA_IMAGE_TAG="latest"                                             # Default
 export ACCELERATOR_TYPE="H100"                                            # Auto-detected or default
 ```
