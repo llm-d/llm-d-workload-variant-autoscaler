@@ -37,9 +37,9 @@ import (
 
 	llmdVariantAutoscalingV1alpha1 "github.com/llm-d-incubation/workload-variant-autoscaler/api/v1alpha1"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/config"
+	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/controller/indexers"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/datastore"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/engines/common"
-	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/indexers"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/logging"
 	"github.com/llm-d-incubation/workload-variant-autoscaler/internal/utils"
 )
