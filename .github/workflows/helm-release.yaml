@@ -83,6 +83,9 @@ jobs:
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --push \
+            --annotation "index:org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --annotation "index:org.opencontainers.image.description=Workload Variant Autoscaler (WVA) - GPU-aware autoscaler for LLM inference workloads" \
+            --annotation "index:org.opencontainers.image.licenses=Apache-2.0" \
             -t $IMAGE:$TAG \
             -t $IMAGE:latest .
 

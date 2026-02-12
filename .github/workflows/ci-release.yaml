@@ -7,6 +7,10 @@ on:
   release:
     types: [published]  # Also runs when a GitHub release is published
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   docker-build-and-push:
     runs-on: ubuntu-latest
@@ -52,6 +56,9 @@ jobs:
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --push \
+            --annotation "index:org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --annotation "index:org.opencontainers.image.description=Workload Variant Autoscaler (WVA) - GPU-aware autoscaler for LLM inference workloads" \
+            --annotation "index:org.opencontainers.image.licenses=Apache-2.0" \
             -t $IMAGE:$VERSION_TAG \
             -t $IMAGE:latest .
 
