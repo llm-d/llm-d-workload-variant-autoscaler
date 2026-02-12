@@ -11,6 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  push:
+    branches:
+      - test/nightly-e2e  # Temporary trigger for testing — remove before merge
   schedule:
     - cron: '0 0 * * *'  # Midnight UTC daily
   workflow_dispatch:
