@@ -58,7 +58,7 @@ Contributing to WVA:
 ## Additional Resources
 
 - [Community Proposal](https://docs.google.com/document/d/1n6SAhloQaoSyF2k3EveIOerT-f97HuWXTLFm07xcvqk/edit)
-- [llm-d Infrastructure](https://github.com/llm-d-incubation/llm-d-infra)
+- [llm-d Infrastructure](https://github.com/llm-d/llm-d-infra)
 - [API Proposal](https://docs.google.com/document/d/1j2KRAT68_FYxq1iVzG0xVL-DHQhGVUZBqiM22Hd_0hc/edit)
 
 ## Need Help?

@@ -70,7 +70,11 @@ jobs:
       # 4. Log in to GHCR for Docker push
       # -----------------------------------------
       - name: Docker login GHCR
-        run: echo "${{ secrets.CR_TOKEN }}" | docker login ghcr.io -u ${{ secrets.CR_USER }} --password-stdin
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       # -----------------------------------------
       # 5. Build and push multi-arch Docker image
@@ -121,12 +125,10 @@ jobs:
       # 8. Login to GHCR for chart publishing
       # -----------------------------------------
       - name: Login to GHCR (Helm)
-        env:
-          GITHUB_TOKEN: ${{ secrets.CR_TOKEN }}
         run: |
           helm registry login ghcr.io \
-            --username ${{ secrets.CR_USER }} \
-            --password "$GITHUB_TOKEN"
+            --username ${{ github.actor }} \
+            --password "${{ github.token }}"
           echo "Helm registry login successful"
 
       # -----------------------------------------
@@ -140,8 +142,6 @@ jobs:
       # 10. Push chart to GHCR
       # -----------------------------------------
       - name: Push Helm chart
-        env:
-          GITHUB_TOKEN: ${{ secrets.CR_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           CHART_FILE="workload-variant-autoscaler-${VERSION}.tgz"

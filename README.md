@@ -205,7 +205,7 @@ Apache 2.0 - see [LICENSE](LICENSE) for details.
 
 ## Related Projects
 
-- [llm-d infrastructure](https://github.com/llm-d-incubation/llm-d-infra)
+- [llm-d infrastructure](https://github.com/llm-d/llm-d-infra)
 - [llm-d main repository](https://github.com/llm-d/llm-d)
 
 ## References
