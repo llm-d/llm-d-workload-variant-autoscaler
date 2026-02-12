@@ -1,0 +1,330 @@
+name: Nightly - OpenShift E2E Tests
+
+# Nightly regression test for WVA on OpenShift.
+# Deploys the full WVA + llm-d stack using released images and runs the e2e test suite.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-e2e-openshift
+  cancel-in-progress: true
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Midnight UTC daily
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: 'Model ID'
+        required: false
+        default: 'unsloth/Meta-Llama-3.1-8B'
+      accelerator_type:
+        description: 'Accelerator type (H100, A100, L40S)'
+        required: false
+        default: 'A100'
+      image_tag:
+        description: 'WVA image tag (default: latest released)'
+        required: false
+        default: 'v0.5.0'
+      request_rate:
+        description: 'Request rate (req/s)'
+        required: false
+        default: '20'
+      num_prompts:
+        description: 'Number of prompts'
+        required: false
+        default: '3000'
+      max_num_seqs:
+        description: 'vLLM max batch size (lower = easier to saturate)'
+        required: false
+        default: '1'
+      hpa_stabilization_seconds:
+        description: 'HPA stabilization window in seconds'
+        required: false
+        default: '240'
+      skip_cleanup:
+        description: 'Skip cleanup after tests (for debugging)'
+        required: false
+        default: 'false'
+
+jobs:
+  nightly-e2e:
+    runs-on: [self-hosted, openshift]
+    env:
+      MODEL_ID: ${{ github.event.inputs.model_id || 'unsloth/Meta-Llama-3.1-8B' }}
+      ACCELERATOR_TYPE: ${{ github.event.inputs.accelerator_type || 'A100' }}
+      REQUEST_RATE: ${{ github.event.inputs.request_rate || '20' }}
+      NUM_PROMPTS: ${{ github.event.inputs.num_prompts || '3000' }}
+      MAX_NUM_SEQS: ${{ github.event.inputs.max_num_seqs || '1' }}
+      HPA_STABILIZATION_SECONDS: ${{ github.event.inputs.hpa_stabilization_seconds || '240' }}
+      SKIP_CLEANUP: ${{ github.event.inputs.skip_cleanup || 'false' }}
+      WVA_IMAGE_TAG: ${{ github.event.inputs.image_tag || 'v0.5.0' }}
+      # Use main branch of llm-d/llm-d for latest charts
+      LLM_D_RELEASE: main
+      # Fixed namespaces for nightly (not PR-specific)
+      LLMD_NAMESPACE: llm-d-nightly-wva
+      WVA_NAMESPACE: llm-d-nightly-wva-system
+      WVA_RELEASE_NAME: wva-nightly
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Extract Go version from go.mod
+        run: sed -En 's/^go (.*)$/GO_VERSION=\1/p' go.mod >> $GITHUB_ENV
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+          cache-dependency-path: ./go.sum
+
+      - name: Install tools (kubectl, oc, helm)
+        run: |
+          sudo apt-get update && sudo apt-get install -y make
+          # Install kubectl
+          KUBECTL_VERSION="v1.31.0"
+          echo "Installing kubectl version: $KUBECTL_VERSION"
+          curl -fsSL --retry 3 --retry-delay 5 -o kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          curl -fsSL --retry 3 --retry-delay 5 -o kubectl.sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256"
+          echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          rm -f kubectl.sha256
+          # Install oc (OpenShift CLI)
+          curl -fsSL --retry 3 --retry-delay 5 -O "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz"
+          tar -xzf openshift-client-linux.tar.gz
+          sudo mv oc /usr/local/bin/
+          rm -f openshift-client-linux.tar.gz kubectl README.md
+          # Install helm
+          curl -fsSL --retry 3 --retry-delay 5 https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Verify cluster access
+        run: |
+          echo "Verifying cluster access..."
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Check GPU availability
+        id: gpu-check
+        run: |
+          echo "Checking GPU availability for nightly e2e test..."
+
+          # Single-model nightly: 2 GPUs minimum, 4 recommended for scale-up
+          REQUIRED_GPUS=2
+          RECOMMENDED_GPUS=4
+
+          # Total allocatable GPUs across all nodes
+          TOTAL_GPUS=$(kubectl get nodes -o json | \
+            jq '[.items[].status.allocatable["nvidia.com/gpu"] // "0" | tonumber] | add // 0')
+
+          # Currently requested GPUs by all pods
+          ALLOCATED_GPUS=$(kubectl get pods --all-namespaces -o json | \
+            jq '[.items[] | select(.status.phase == "Running" or .status.phase == "Pending") | .spec.containers[]?.resources.requests["nvidia.com/gpu"] // "0" | tonumber] | add // 0')
+
+          AVAILABLE_GPUS=$((TOTAL_GPUS - ALLOCATED_GPUS))
+
+          TOTAL_CPU=$(kubectl get nodes -o json | \
+            jq '[.items[].status.allocatable.cpu // "0" | if endswith("m") then (gsub("m$";"") | tonumber / 1000) else tonumber end] | add | floor')
+          TOTAL_MEM_KI=$(kubectl get nodes -o json | \
+            jq '[.items[].status.allocatable.memory // "0" | gsub("[^0-9]";"") | tonumber] | add')
+          TOTAL_MEM_GI=$((TOTAL_MEM_KI / 1048576))
+
+          NODE_COUNT=$(kubectl get nodes --no-headers | wc -l | tr -d ' ')
+          GPU_NODE_COUNT=$(kubectl get nodes -o json | \
+            jq '[.items[] | select((.status.allocatable["nvidia.com/gpu"] // "0" | tonumber) > 0)] | length')
+
+          echo "total_gpus=$TOTAL_GPUS" >> $GITHUB_OUTPUT
+          echo "allocated_gpus=$ALLOCATED_GPUS" >> $GITHUB_OUTPUT
+          echo "available_gpus=$AVAILABLE_GPUS" >> $GITHUB_OUTPUT
+          echo "total_cpu=$TOTAL_CPU" >> $GITHUB_OUTPUT
+          echo "total_mem_gi=$TOTAL_MEM_GI" >> $GITHUB_OUTPUT
+          echo "node_count=$NODE_COUNT" >> $GITHUB_OUTPUT
+          echo "gpu_node_count=$GPU_NODE_COUNT" >> $GITHUB_OUTPUT
+
+          echo "## GPU Status (Nightly)" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Total cluster GPUs | $TOTAL_GPUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Currently allocated | $ALLOCATED_GPUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Available | $AVAILABLE_GPUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Required (minimum) | $REQUIRED_GPUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Recommended (with scale-up) | $RECOMMENDED_GPUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Nodes | $NODE_COUNT ($GPU_NODE_COUNT with GPUs) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total CPU | ${TOTAL_CPU} cores |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Memory | ${TOTAL_MEM_GI} Gi |" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$AVAILABLE_GPUS" -lt "$REQUIRED_GPUS" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Insufficient GPUs** - need $REQUIRED_GPUS but only $AVAILABLE_GPUS available." >> $GITHUB_STEP_SUMMARY
+            echo "::error::Insufficient GPUs: need $REQUIRED_GPUS, have $AVAILABLE_GPUS available"
+            exit 1
+          elif [ "$AVAILABLE_GPUS" -lt "$RECOMMENDED_GPUS" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Low GPU headroom** - $AVAILABLE_GPUS available (need $RECOMMENDED_GPUS for scale-up tests)." >> $GITHUB_STEP_SUMMARY
+            echo "::warning::Low GPU headroom: $AVAILABLE_GPUS available, $RECOMMENDED_GPUS recommended for scale-up tests"
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**GPUs available** - $AVAILABLE_GPUS GPUs free ($REQUIRED_GPUS required, $RECOMMENDED_GPUS recommended)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Get HF token from cluster secret
+        run: |
+          echo "Reading HF token from cluster secret llm-d-hf-token in default namespace..."
+          if ! kubectl get secret llm-d-hf-token -n default &>/dev/null; then
+            echo "::error::Secret 'llm-d-hf-token' not found in default namespace"
+            exit 1
+          fi
+          HF_TOKEN=$(kubectl get secret llm-d-hf-token -n default -o jsonpath='{.data.HF_TOKEN}' | base64 -d)
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::Secret 'llm-d-hf-token' exists but 'HF_TOKEN' key is empty or missing"
+            exit 1
+          fi
+          echo "::add-mask::$HF_TOKEN"
+          echo "HF_TOKEN=$HF_TOKEN" >> $GITHUB_ENV
+          echo "HF token retrieved successfully"
+
+      - name: Clean up previous nightly resources
+        run: |
+          echo "Cleaning up previous nightly resources..."
+          echo "  LLMD_NAMESPACE: $LLMD_NAMESPACE"
+          echo "  WVA_NAMESPACE: $WVA_NAMESPACE"
+
+          for ns in "$LLMD_NAMESPACE" "$WVA_NAMESPACE"; do
+            if kubectl get namespace "$ns" &>/dev/null; then
+              echo ""
+              echo "=== Cleaning up namespace: $ns ==="
+              echo "  Removing HPAs and VAs..."
+              kubectl delete hpa -n "$ns" -l app.kubernetes.io/name=workload-variant-autoscaler --ignore-not-found || true
+              kubectl delete variantautoscaling -n "$ns" -l app.kubernetes.io/name=workload-variant-autoscaler --ignore-not-found || true
+              for release in $(helm list -n "$ns" -q 2>/dev/null); do
+                echo "  Uninstalling helm release: $release"
+                helm uninstall "$release" -n "$ns" --ignore-not-found --wait --timeout 60s || true
+              done
+              echo "  Deleting namespace: $ns"
+              kubectl delete namespace "$ns" --ignore-not-found --timeout=60s || true
+            else
+              echo "Namespace $ns does not exist, skipping cleanup"
+            fi
+          done
+
+          # Clean up cluster-scoped WVA resources from previous nightly
+          echo "Removing cluster-scoped WVA resources for release $WVA_RELEASE_NAME..."
+          kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/name=workload-variant-autoscaler,app.kubernetes.io/instance="$WVA_RELEASE_NAME" --ignore-not-found || true
+
+          echo "Pre-cleanup complete"
+
+      - name: Apply latest CRDs
+        run: |
+          echo "Applying latest VariantAutoscaling CRD..."
+          kubectl apply -f charts/workload-variant-autoscaler/crds/
+
+      - name: Deploy WVA and llm-d infrastructure
+        env:
+          ENVIRONMENT: openshift
+          INSTALL_GATEWAY_CTRLPLANE: "false"
+          BENCHMARK_MODE: "false"
+          E2E_TESTS_ENABLED: "true"
+          NAMESPACE_SCOPED: "false"
+          LLMD_NS: ${{ env.LLMD_NAMESPACE }}
+          WVA_NS: ${{ env.WVA_NAMESPACE }}
+          CONTROLLER_INSTANCE: ${{ env.WVA_RELEASE_NAME }}
+          VLLM_MAX_NUM_SEQS: ${{ env.MAX_NUM_SEQS }}
+          DECODE_REPLICAS: "1"
+        run: |
+          echo "Deploying WVA and llm-d infrastructure (nightly)..."
+          echo "  MODEL_ID: $MODEL_ID"
+          echo "  ACCELERATOR_TYPE: $ACCELERATOR_TYPE"
+          echo "  LLMD_NS: $LLMD_NS"
+          echo "  WVA_NS: $WVA_NS"
+          echo "  WVA_RELEASE_NAME: $WVA_RELEASE_NAME"
+          echo "  WVA_IMAGE_TAG: $WVA_IMAGE_TAG"
+          echo "  CONTROLLER_INSTANCE: $CONTROLLER_INSTANCE"
+          echo "  VLLM_MAX_NUM_SEQS: $VLLM_MAX_NUM_SEQS"
+          echo "  DECODE_REPLICAS: $DECODE_REPLICAS"
+          ./deploy/install.sh --model "$MODEL_ID" --accelerator "$ACCELERATOR_TYPE" --release-name "$WVA_RELEASE_NAME" --environment openshift
+
+      - name: Label namespaces for OpenShift monitoring
+        run: |
+          echo "Adding openshift.io/user-monitoring label to namespaces for Prometheus scraping..."
+          kubectl label namespace "$LLMD_NAMESPACE" openshift.io/user-monitoring=true --overwrite
+          kubectl label namespace "$WVA_NAMESPACE" openshift.io/user-monitoring=true --overwrite
+          echo "Namespace labels applied"
+
+      - name: Wait for infrastructure to be ready
+        run: |
+          echo "Waiting for WVA controller to be ready..."
+          kubectl wait --for=condition=available --timeout=300s deployment -l app.kubernetes.io/name=workload-variant-autoscaler -n "$WVA_NAMESPACE" || true
+          kubectl get pods -n "$WVA_NAMESPACE"
+          echo "Waiting for llm-d deployment to be ready..."
+          kubectl get pods -n "$LLMD_NAMESPACE"
+
+      - name: Install Go dependencies
+        run: go mod download
+
+      - name: Run OpenShift E2E tests
+        env:
+          CONTROLLER_NAMESPACE: ${{ env.WVA_NAMESPACE }}
+          MONITORING_NAMESPACE: openshift-user-workload-monitoring
+          LLMD_NAMESPACE: ${{ env.LLMD_NAMESPACE }}
+          GATEWAY_NAME: infra-inference-scheduling-inference-gateway-istio
+          DEPLOYMENT: ms-inference-scheduling-llm-d-modelservice-decode
+          WVA_RELEASE_NAME: ${{ env.WVA_RELEASE_NAME }}
+        run: |
+          echo "Running Nightly OpenShift E2E tests:"
+          echo "  CONTROLLER_NAMESPACE: $CONTROLLER_NAMESPACE"
+          echo "  LLMD_NAMESPACE: $LLMD_NAMESPACE"
+          echo "  DEPLOYMENT: $DEPLOYMENT"
+          echo "  GATEWAY_NAME: $GATEWAY_NAME"
+          echo "  MODEL_ID: $MODEL_ID"
+          echo "  REQUEST_RATE: $REQUEST_RATE"
+          echo "  NUM_PROMPTS: $NUM_PROMPTS"
+          echo "  WVA_RELEASE_NAME: $WVA_RELEASE_NAME"
+          make test-e2e-openshift
+
+      - name: Nightly summary
+        if: always()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Nightly E2E Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Model | $MODEL_ID |" >> $GITHUB_STEP_SUMMARY
+          echo "| Accelerator | $ACCELERATOR_TYPE |" >> $GITHUB_STEP_SUMMARY
+          echo "| WVA Image | ghcr.io/llm-d/llm-d-workload-variant-autoscaler:$WVA_IMAGE_TAG |" >> $GITHUB_STEP_SUMMARY
+          echo "| llm-d Release | $LLM_D_RELEASE |" >> $GITHUB_STEP_SUMMARY
+          echo "| Request Rate | $REQUEST_RATE req/s |" >> $GITHUB_STEP_SUMMARY
+          echo "| Prompts | $NUM_PROMPTS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Max Batch Size | $MAX_NUM_SEQS |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup infrastructure
+        if: always() && env.SKIP_CLEANUP != 'true'
+        run: |
+          echo "Cleaning up ALL nightly test infrastructure..."
+          echo "  LLMD_NAMESPACE: $LLMD_NAMESPACE"
+          echo "  WVA_NAMESPACE: $WVA_NAMESPACE"
+          echo "  WVA_RELEASE_NAME: $WVA_RELEASE_NAME"
+
+          # Uninstall WVA helm release
+          echo "Uninstalling WVA helm release..."
+          helm uninstall "$WVA_RELEASE_NAME" -n "$WVA_NAMESPACE" --ignore-not-found --wait --timeout 60s || true
+
+          # Uninstall llm-d helm releases
+          echo "Uninstalling llm-d helm releases..."
+          for release in $(helm list -n "$LLMD_NAMESPACE" -q 2>/dev/null); do
+            echo "  Uninstalling release: $release"
+            helm uninstall "$release" -n "$LLMD_NAMESPACE" --ignore-not-found --wait --timeout 60s || true
+          done
+
+          # Delete namespaces
+          echo "Deleting namespace $LLMD_NAMESPACE..."
+          kubectl delete namespace "$LLMD_NAMESPACE" --ignore-not-found --timeout=120s || true
+
+          echo "Deleting namespace $WVA_NAMESPACE..."
+          kubectl delete namespace "$WVA_NAMESPACE" --ignore-not-found --timeout=120s || true
+
+          # Clean up cluster-scoped WVA resources
+          echo "Removing cluster-scoped WVA resources for release $WVA_RELEASE_NAME..."
+          kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/name=workload-variant-autoscaler,app.kubernetes.io/instance="$WVA_RELEASE_NAME" --ignore-not-found || true
+
+          echo "Nightly cleanup complete"
