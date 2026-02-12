@@ -1,14 +1,11 @@
 package config
 
 import (
-	"context"
-	"fmt"
-	"os"
+	"maps"
 	"sync"
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	interfaces "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
 )
@@ -16,16 +13,24 @@ import (
 // Config is the unified configuration structure for the WVA controller.
 // All fields are private and accessed via thread-safe getter methods.
 type Config struct {
-	mu sync.RWMutex // Single mutex for all mutable fields
+	mu         sync.RWMutex // Single mutex for all mutable fields
+	configSync configSyncState
 
 	infrastructure infrastructureConfig
 	tls            tlsConfig
 	prometheus     prometheusConfig
 	epp            eppConfig
-	optimization   optimizationConfig
 	features       featureFlagsConfig
 	saturation     saturationConfig  // namespace-aware
 	scaleToZero    scaleToZeroConfig // namespace-aware
+
+}
+
+// configSyncState tracks configuration sync state used for startup/readiness checks.
+type configSyncState struct {
+	configMapsBootstrapComplete bool
+	lastConfigMapsSyncAt        time.Time
+	lastConfigMapsSyncError     string
 }
 
 // infrastructureConfig holds server/controller infrastructure settings
@@ -42,6 +47,7 @@ type infrastructureConfig struct {
 	enableHTTP2          bool
 	watchNamespace       string
 	loggerVerbosity      int
+	optimizationInterval time.Duration
 }
 
 // tlsConfig holds TLS certificate paths
@@ -54,31 +60,9 @@ type tlsConfig struct {
 	metricsCertKey  string
 }
 
-// prometheusConfig holds all Prometheus-related configuration
-// (both connection settings and cache config)
-type prometheusConfig struct {
-	// Immutable (set at startup)
-	baseURL            string
-	bearerToken        string
-	tokenPath          string
-	insecureSkipVerify bool
-	caCertPath         string
-	clientCertPath     string
-	clientKeyPath      string
-	serverName         string
-
-	// Mutable (can change at runtime)
-	cache *CacheConfig
-}
-
 // eppConfig holds EPP (Endpoint Pool) integration configuration
 type eppConfig struct {
 	metricReaderBearerToken string
-}
-
-// optimizationConfig holds optimization settings
-type optimizationConfig struct {
-	interval time.Duration
 }
 
 // featureFlagsConfig holds feature flags
@@ -271,104 +255,6 @@ func (c *Config) MetricsCertKey() string {
 }
 
 // ============================================================================
-// Prometheus Getters (thread-safe)
-// ============================================================================
-
-// PrometheusBaseURL returns the Prometheus base URL.
-// Thread-safe.
-func (c *Config) PrometheusBaseURL() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.prometheus.baseURL
-}
-
-// PrometheusBearerToken returns the Prometheus bearer token.
-// Thread-safe.
-func (c *Config) PrometheusBearerToken() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.prometheus.bearerToken
-}
-
-// PrometheusTokenPath returns the Prometheus token path.
-// Thread-safe.
-func (c *Config) PrometheusTokenPath() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.prometheus.tokenPath
-}
-
-// PrometheusInsecureSkipVerify returns whether to skip TLS verification.
-// Thread-safe.
-func (c *Config) PrometheusInsecureSkipVerify() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.prometheus.insecureSkipVerify
-}
-
-// PrometheusCACertPath returns the Prometheus CA certificate path.
-// Thread-safe.
-func (c *Config) PrometheusCACertPath() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.prometheus.caCertPath
-}
-
-// PrometheusClientCertPath returns the Prometheus client certificate path.
-// Thread-safe.
-func (c *Config) PrometheusClientCertPath() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.prometheus.clientCertPath
-}
-
-// PrometheusClientKeyPath returns the Prometheus client key path.
-// Thread-safe.
-func (c *Config) PrometheusClientKeyPath() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.prometheus.clientKeyPath
-}
-
-// PrometheusServerName returns the Prometheus server name.
-// Thread-safe.
-func (c *Config) PrometheusServerName() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.prometheus.serverName
-}
-
-// PrometheusCacheConfig returns the current Prometheus cache configuration.
-// Thread-safe. Returns a copy to prevent external modifications.
-func (c *Config) PrometheusCacheConfig() *CacheConfig {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.prometheus.cache == nil {
-		return nil
-	}
-	// Return a copy to prevent external modifications
-	cp := *c.prometheus.cache
-	return &cp
-}
-
-// Prometheus returns the full Prometheus configuration as an interfaces.PrometheusConfig.
-// Thread-safe. Returns a copy to prevent external modifications.
-func (c *Config) Prometheus() *interfaces.PrometheusConfig {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return &interfaces.PrometheusConfig{
-		BaseURL:            c.prometheus.baseURL,
-		BearerToken:        c.prometheus.bearerToken,
-		TokenPath:          c.prometheus.tokenPath,
-		InsecureSkipVerify: c.prometheus.insecureSkipVerify,
-		CACertPath:         c.prometheus.caCertPath,
-		ClientCertPath:     c.prometheus.clientCertPath,
-		ClientKeyPath:      c.prometheus.clientKeyPath,
-		ServerName:         c.prometheus.serverName,
-	}
-}
-
-// ============================================================================
 // EPP Getters (thread-safe)
 // ============================================================================
 
@@ -389,7 +275,7 @@ func (c *Config) EPPMetricReaderBearerToken() string {
 func (c *Config) OptimizationInterval() time.Duration {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.optimization.interval
+	return c.infrastructure.optimizationInterval
 }
 
 // ============================================================================
@@ -520,18 +406,6 @@ func copyScaleToZeroConfig(src ScaleToZeroConfigData) ScaleToZeroConfigData {
 	return result
 }
 
-// UpdateOptimizationInterval updates the optimization interval.
-// Thread-safe.
-func (c *Config) UpdateOptimizationInterval(interval time.Duration) {
-	c.mu.Lock()
-	oldInterval := c.optimization.interval
-	c.optimization.interval = interval
-	c.mu.Unlock()
-	if oldInterval != interval {
-		ctrl.Log.Info("Updated optimization interval", "old", oldInterval, "new", interval)
-	}
-}
-
 // UpdateSaturationConfig updates the global saturation scaling configuration.
 // Thread-safe. Takes a copy of the provided map to prevent external modifications.
 // For namespace-local updates, use UpdateSaturationConfigForNamespace instead.
@@ -548,9 +422,7 @@ func (c *Config) UpdateSaturationConfigForNamespace(namespace string, config map
 
 	// Make a copy to prevent external modifications
 	newConfig := make(map[string]interfaces.SaturationScalingConfig, len(config))
-	for k, v := range config {
-		newConfig[k] = v
-	}
+	maps.Copy(newConfig, config)
 
 	var oldCount int
 	if namespace == "" {
@@ -681,15 +553,13 @@ func NewTestConfig() *Config {
 			enableHTTP2:          false,
 			watchNamespace:       "",
 			loggerVerbosity:      0,
+			optimizationInterval: 15 * time.Second,
 		},
 		tls: tlsConfig{
 			webhookCertName: "tls.crt",
 			webhookCertKey:  "tls.key",
 			metricsCertName: "tls.crt",
 			metricsCertKey:  "tls.key",
-		},
-		optimization: optimizationConfig{
-			interval: 60 * time.Second,
 		},
 		features: featureFlagsConfig{
 			scaleToZeroEnabled:          false,
@@ -708,61 +578,54 @@ func NewTestConfig() *Config {
 	return cfg
 }
 
-// NewTestConfigWithPrometheus creates a test Config with Prometheus configuration.
-// This is a convenience helper for tests that need a Config with Prometheus already configured.
-// It uses the public Load API internally, so it's safe for use in other packages.
-func NewTestConfigWithPrometheus(ctx context.Context, prometheusURL string, k8sClient client.Client) (*Config, error) {
-	// Set environment variable for Prometheus URL
-	_ = os.Setenv("PROMETHEUS_BASE_URL", prometheusURL)
-	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
+// setPrometheusBaseURLForTesting sets the Prometheus base URL for testing purposes only.
+// This is internal and can only be used by tests in the config package.
+//
+//nolint:unused // Used by tests in config_test.go
+func (c *Config) setPrometheusBaseURLForTesting(baseURL string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.prometheus.baseURL = baseURL
+}
 
-	cfg, err := Load(ctx, nil, k8sClient)
+// --- Bootstrap State Management ---
+
+// ConfigMapsBootstrapComplete returns true once the initial ConfigMap bootstrap has completed.
+// Thread-safe.
+func (c *Config) ConfigMapsBootstrapComplete() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.configSync.configMapsBootstrapComplete
+}
+
+// ConfigMapsBootstrapSyncStatus returns the bootstrap state for ConfigMap synchronization.
+// Thread-safe.
+func (c *Config) ConfigMapsBootstrapSyncStatus() (bool, time.Time, string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.configSync.configMapsBootstrapComplete, c.configSync.lastConfigMapsSyncAt, c.configSync.lastConfigMapsSyncError
+}
+
+// MarkConfigMapsBootstrapComplete marks initial ConfigMap bootstrap as completed successfully.
+// Thread-safe.
+func (c *Config) MarkConfigMapsBootstrapComplete() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.configSync.configMapsBootstrapComplete = true
+	c.configSync.lastConfigMapsSyncAt = time.Now()
+	c.configSync.lastConfigMapsSyncError = ""
+}
+
+// MarkConfigMapsBootstrapFailed marks initial ConfigMap bootstrap as failed.
+// Thread-safe.
+func (c *Config) MarkConfigMapsBootstrapFailed(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.configSync.configMapsBootstrapComplete = false
+	c.configSync.lastConfigMapsSyncAt = time.Now()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create test config: %w", err)
+		c.configSync.lastConfigMapsSyncError = err.Error()
+		return
 	}
-	return cfg, nil
-}
-
-// setPrometheusConfigForTesting sets the Prometheus configuration for testing purposes only.
-// This is internal and can only be used by tests in the config package.
-//
-//nolint:unused // Used by tests in config_test.go
-func (c *Config) setPrometheusConfigForTesting(promConfig *interfaces.PrometheusConfig) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if promConfig != nil {
-		c.prometheus.baseURL = promConfig.BaseURL
-		c.prometheus.bearerToken = promConfig.BearerToken
-		c.prometheus.tokenPath = promConfig.TokenPath
-		c.prometheus.insecureSkipVerify = promConfig.InsecureSkipVerify
-		c.prometheus.caCertPath = promConfig.CACertPath
-		c.prometheus.clientCertPath = promConfig.ClientCertPath
-		c.prometheus.clientKeyPath = promConfig.ClientKeyPath
-		c.prometheus.serverName = promConfig.ServerName
-	}
-}
-
-// setOptimizationIntervalForTesting sets the optimization interval for testing purposes only.
-// This is internal and can only be used by tests in the config package.
-//
-//nolint:unused // Used by tests in config_test.go
-func (c *Config) setOptimizationIntervalForTesting(interval time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.optimization.interval = interval
-}
-
-// setPrometheusCacheConfigForTesting sets the Prometheus cache configuration for testing purposes only.
-// This is internal and can only be used by tests in the config package.
-//
-//nolint:unused // Used by tests in config_test.go
-func (c *Config) setPrometheusCacheConfigForTesting(cacheConfig *CacheConfig) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if cacheConfig == nil {
-		c.prometheus.cache = nil
-	} else {
-		cp := *cacheConfig
-		c.prometheus.cache = &cp
-	}
+	c.configSync.lastConfigMapsSyncError = ""
 }

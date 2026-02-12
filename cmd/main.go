@@ -20,6 +20,8 @@ import (
 	"context"
 	"crypto/tls"
 	goflag "flag"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -35,7 +37,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -80,66 +81,46 @@ func init() {
 
 // nolint:gocyclo
 func main() {
-	// Server and certificate configuration
-	var (
-		metricsAddr                                      string
-		probeAddr                                        string
-		metricsCertPath, metricsCertName, metricsCertKey string
+	// Command-line flags
 
-		webhookCertPath, webhookCertName, webhookCertKey string
-		watchNamespace                                   string
-	)
-	// Leader election configuration
-	var (
-		enableLeaderElection bool
-		leaseDuration        time.Duration
-		renewDeadline        time.Duration
-		retryPeriod          time.Duration
-		restTimeout          time.Duration
-	)
-	// Feature flags
-	var (
-		secureMetrics bool
-		enableHTTP2   bool
-	)
-	// Other
-	var tlsOpts []func(*tls.Config)
-	var loggerVerbosity int
+	loggerVerbosity := flag.Int("v", logging.DEFAULT, "number for the log level verbosity")
 
-	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
+	configFilePath := flag.String("config-file", "", "Path to the YAML configuration file. "+
+		"When set, the main configuration is read from this file instead of a Kubernetes ConfigMap.")
+
+	flag.String("metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
-	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
+	flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.Bool("leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flag.BoolVar(&secureMetrics, "metrics-secure", true,
+	flag.Bool("metrics-secure", true,
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
-	flag.StringVar(&webhookCertPath, "webhook-cert-path", "", "The directory that contains the webhook certificate.")
-	flag.StringVar(&webhookCertName, "webhook-cert-name", "tls.crt", "The name of the webhook certificate file.")
-	flag.StringVar(&webhookCertKey, "webhook-cert-key", "tls.key", "The name of the webhook key file.")
-	flag.StringVar(&metricsCertPath, "metrics-cert-path", "",
+	flag.String("webhook-cert-path", "", "The directory that contains the webhook certificate.")
+	flag.String("webhook-cert-name", "tls.crt", "The name of the webhook certificate file.")
+	flag.String("webhook-cert-key", "tls.key", "The name of the webhook key file.")
+	flag.String("metrics-cert-path", "",
 		"The directory that contains the metrics server certificate.")
-	flag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt", "The name of the metrics server certificate file.")
-	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics key file.")
-	flag.BoolVar(&enableHTTP2, "enable-http2", false,
+	flag.String("metrics-cert-name", "tls.crt", "The name of the metrics server certificate file.")
+	flag.String("metrics-cert-key", "tls.key", "The name of the metrics key file.")
+	flag.Bool("enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.StringVar(&watchNamespace, "watch-namespace", "",
+	flag.String("watch-namespace", "",
 		"Namespace to watch for updates. If unspecified, all namespaces are watched.")
-	flag.IntVar(&loggerVerbosity, "v", logging.DEFAULT, "number for the log level verbosity")
 
 	// Leader election timeout configuration flags
 	// These can be overridden in manager.yaml to tune for different environments
 	// (e.g., higher values for environments with network latency or API server slowness)
-	flag.DurationVar(&leaseDuration, "leader-election-lease-duration", 60*time.Second,
+	flag.Duration("leader-election-lease-duration", 60*time.Second,
 		"The duration that non-leader candidates will wait to force acquire leadership. "+
 			"Increased from default 15s to 60s to prevent lease renewal failures in environments with network latency.")
-	flag.DurationVar(&renewDeadline, "leader-election-renew-deadline", 50*time.Second,
+	flag.Duration("leader-election-renew-deadline", 50*time.Second,
 		"The duration that the acting master will retry refreshing leadership before giving up. "+
 			"Increased from default 10s to 50s to provide more tolerance for network latency and API server delays.")
-	flag.DurationVar(&retryPeriod, "leader-election-retry-period", 10*time.Second,
+	flag.Duration("leader-election-retry-period", 10*time.Second,
 		"The duration the clients should wait between tries of actions. "+
 			"Increased from default 2s to 10s to reduce API server load and provide more time between renewal attempts.")
-	flag.DurationVar(&restTimeout, "rest-client-timeout", 60*time.Second,
+	flag.Duration("rest-client-timeout", 60*time.Second,
 		"The timeout for REST API calls to the Kubernetes API server. "+
 			"Increased from default ~30s to 60s for better resilience against network latency.")
 
@@ -152,7 +133,7 @@ func main() {
 
 	flag.Parse()
 
-	logging.InitLogging(&opts, &loggerVerbosity)
+	logging.InitLogging(&opts, loggerVerbosity)
 	defer logging.Sync() // nolint:errcheck
 
 	setupLog := ctrl.Log.WithName("setup")
@@ -161,18 +142,11 @@ func main() {
 	// Get REST config early (needed for config loading)
 	restConfig := ctrl.GetConfigOrDie()
 
-	// Create a temporary client for config loading (before manager creation)
-	// This allows us to load ConfigMaps during startup
-	tempClient, err := client.New(restConfig, client.Options{Scheme: scheme})
-	if err != nil {
-		setupLog.Error(err, "unable to create temporary client for config loading")
-		os.Exit(1)
-	}
-
 	// Load unified configuration (fail-fast if invalid)
-	// Viper resolves precedence: flags > env > ConfigMap > defaults
-	ctx := context.Background()
-	cfg, err := config.Load(ctx, flag.CommandLine, tempClient)
+	// Viper resolves precedence: flags > env > config file > defaults
+	// For more information see:
+	// https://github.com/llm-d/llm-d-workload-variant-autoscaler/blob/main/docs/user-guide/configuration.md
+	cfg, err := config.Load(flag.CommandLine, *configFilePath)
 	if err != nil {
 		setupLog.Error(err, "failed to load configuration - this is a fatal error")
 		os.Exit(1)
@@ -190,6 +164,7 @@ func main() {
 		c.NextProtos = []string{"http/1.1"}
 	}
 
+	var tlsOpts []func(*tls.Config)
 	if !cfg.EnableHTTP2() {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
@@ -341,26 +316,44 @@ func main() {
 	_ = metrics.NewMetricsEmitter()
 	setupLog.Info("Metrics emitter created successfully")
 
+	// Create ConfigMap reconciler for configuration management.
+	// Bootstrap uses the temporary uncached client so ConfigMap-backed settings
+	// are loaded before any manager runnables start.
+	configMapReconciler := &controller.ConfigMapReconciler{
+		Reader:    mgr.GetAPIReader(),
+		Scheme:    mgr.GetScheme(),
+		Config:    cfg,
+		Datastore: ds,
+		Recorder:  mgr.GetEventRecorderFor("workload-variant-autoscaler-configmap-reconciler"),
+	}
+
+	ctx := context.Background()
+	ctx = ctrl.LoggerInto(ctx, setupLog)
+	if err = configMapReconciler.BootstrapInitialConfigMaps(ctx); err != nil {
+		setupLog.Error(err, "unable to bootstrap initial ConfigMaps")
+		os.Exit(1)
+	}
+	setupLog.Info("Initial ConfigMap bootstrap completed")
+
 	// Use Prometheus configuration from unified Config (already validated during Load())
-	promConfig := cfg.Prometheus()
-	if promConfig == nil || promConfig.BaseURL == "" {
+	if cfg.PrometheusBaseURL() == "" {
 		setupLog.Error(nil, "no Prometheus configuration found - this should not happen after validation")
 		os.Exit(1)
 	}
 
 	// Always validate TLS configuration since HTTPS is required
-	if err := utils.ValidateTLSConfig(promConfig); err != nil {
+	if err := utils.ValidateTLSConfig(cfg); err != nil {
 		setupLog.Error(err, "TLS configuration validation failed - HTTPS is required")
 		os.Exit(1)
 	}
 
 	setupLog.Info("Initializing Prometheus client",
-		"address", promConfig.BaseURL,
+		"address", cfg.PrometheusBaseURL(),
 		"tlsEnabled", true,
 	)
 
 	// Create Prometheus client with TLS support
-	promClientConfig, err := utils.CreatePrometheusClientConfig(promConfig)
+	promClientConfig, err := utils.CreatePrometheusClientConfig(cfg)
 	if err != nil {
 		setupLog.Error(err, "failed to create prometheus client config")
 		os.Exit(1)
@@ -465,15 +458,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create ConfigMap reconciler for configuration management
-	configMapReconciler := &controller.ConfigMapReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Config:    cfg,
-		Datastore: ds,
-		Recorder:  mgr.GetEventRecorderFor("workload-variant-autoscaler-configmap-reconciler"),
-	}
-
 	if err = configMapReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create configmap controller")
 		os.Exit(1)
@@ -499,7 +483,16 @@ func main() {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	if err := mgr.AddReadyzCheck("readyz", func(_ *http.Request) error {
+		if cfg.ConfigMapsBootstrapComplete() {
+			return nil
+		}
+		_, _, syncErr := cfg.ConfigMapsBootstrapSyncStatus()
+		if syncErr != "" {
+			return fmt.Errorf("initial ConfigMap bootstrap not complete: %s", syncErr)
+		}
+		return fmt.Errorf("initial ConfigMap bootstrap not complete")
+	}); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
