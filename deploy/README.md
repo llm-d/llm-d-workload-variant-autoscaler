@@ -999,4 +999,4 @@ kubectl get configmap model-accelerator-data -n workload-variant-autoscaler-syst
 - **OpenShift Guide**: [openshift/README.md](openshift/README.md)
 - **Helm Chart**: [charts/workload-variant-autoscaler](../charts/workload-variant-autoscaler/)
 - **API Reference**: [api/v1alpha1](../api/v1alpha1/)
-- **Architecture**: [docs/architecture.md](../docs/architecture.md)
+- **Architecture**: [docs/design/modeling-optimization.md](../docs/design/modeling-optimization.md)
