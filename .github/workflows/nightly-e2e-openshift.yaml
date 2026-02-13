@@ -51,7 +51,7 @@ concurrency:
 
 jobs:
   nightly:
-    uses: llm-d/llm-d-infra/.github/workflows/reusable-nightly-e2e-openshift.yaml@main
+    uses: llm-d/llm-d-infra/.github/workflows/reusable-nightly-e2e-openshift.yaml@feature/nightly-metrics-diagnostics
     with:
       guide_name: workload-autoscaling
       namespace_suffix: nightly-wva
