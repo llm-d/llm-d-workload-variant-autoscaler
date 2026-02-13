@@ -16,3 +16,10 @@ coule = "coule"
 preformance = "preformance"
 servive = "servive"
 throughtput = "throughtput"
+
+[files]
+extend-exclude = [
+  "go.mod",
+  "go.sum",
+]
+ignore-dot = true
