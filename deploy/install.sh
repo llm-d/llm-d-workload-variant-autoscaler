@@ -772,7 +772,16 @@ deploy_llm_d_infrastructure() {
 
     # Deploy llm-d core components
     log_info "Deploying llm-d core components"
-    helmfile apply -e $GATEWAY_PROVIDER -n ${LLMD_NS}
+    # When DEPLOY_WVA is true, skip WVA in helmfile — install.sh deploys it
+    # separately using the local chart (supports dev/test of chart changes).
+    # The helmfile's WVA release uses the published OCI chart which may not
+    # have the latest fixes and uses KIND-specific defaults (e.g. monitoringNamespace).
+    local helmfile_selector=""
+    if [ "$DEPLOY_WVA" == "true" ]; then
+      helmfile_selector="--selector kind!=autoscaling"
+      log_info "Skipping WVA in helmfile (will be deployed separately from local chart)"
+    fi
+    helmfile apply -e $GATEWAY_PROVIDER -n ${LLMD_NS} $helmfile_selector
     kubectl apply -f httproute.yaml -n ${LLMD_NS}
 
     # Patch llm-d-inference-scheduler deployment if scale-to-zero is enabled
