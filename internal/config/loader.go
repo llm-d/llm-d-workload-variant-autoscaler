@@ -9,13 +9,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-const (
-
-	// ConfigFileKey is the key used in the ConfigMap to store the config file content
-	// when the main config is structured as a single YAML file.
-	ConfigFileKey = "config.yaml"
-)
-
 // flagBindings maps viper keys (= env var names = config file keys) to pflag names.
 var flagBindings = map[string]string{
 	"METRICS_BIND_ADDRESS":           "metrics-bind-address",
