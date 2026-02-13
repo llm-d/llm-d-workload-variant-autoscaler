@@ -68,7 +68,7 @@ INSTALL_GATEWAY_CTRLPLANE_ORIGINAL="${INSTALL_GATEWAY_CTRLPLANE:-}"
 INSTALL_GATEWAY_CTRLPLANE="${INSTALL_GATEWAY_CTRLPLANE:-false}"
 
 # Model and SLO Configuration
-DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-"Qwen/Qwen3-32B"}
+DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-"Qwen/Qwen3-0.6B"}
 MODEL_ID=${MODEL_ID:-"unsloth/Meta-Llama-3.1-8B"}
 ACCELERATOR_TYPE=${ACCELERATOR_TYPE:-"H100"}
 SLO_TPOT=${SLO_TPOT:-10}  # Target time-per-output-token SLO (in ms)
@@ -96,6 +96,8 @@ HPA_STABILIZATION_SECONDS=${HPA_STABILIZATION_SECONDS:-240}
 HPA_MIN_REPLICAS=${HPA_MIN_REPLICAS:-1}
 SKIP_CHECKS=${SKIP_CHECKS:-false}
 E2E_TESTS_ENABLED=${E2E_TESTS_ENABLED:-false}
+# WVA metrics endpoint security (set false to disable bearer token auth on /metrics)
+WVA_METRICS_SECURE=${WVA_METRICS_SECURE:-true}
 # vLLM max-num-seqs (max concurrent sequences per replica, lower = easier to saturate for testing)
 VLLM_MAX_NUM_SEQS=${VLLM_MAX_NUM_SEQS:-""}
 # Decode replicas override (useful for e2e testing with limited GPUs)
@@ -454,6 +456,7 @@ deploy_wva_controller() {
         --set wva.logging.level=$WVA_LOG_LEVEL \
         --set wva.prometheus.tls.insecureSkipVerify=$SKIP_TLS_VERIFY \
         --set wva.namespaceScoped=$NAMESPACE_SCOPED \
+        --set wva.metrics.secure=$WVA_METRICS_SECURE \
         ${CONTROLLER_INSTANCE:+--set wva.controllerInstance=$CONTROLLER_INSTANCE}
     
     # Wait for WVA to be ready
