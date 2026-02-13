@@ -771,8 +771,18 @@ deploy_llm_d_infrastructure() {
     fi
 
     # Deploy llm-d core components
+    # When DEPLOY_WVA is true, skip the WVA release in the helmfile because
+    # deploy_wva_controller() already installed it from the local chart with
+    # correct environment-specific values (e.g. monitoringNamespace).
+    # The helmfile's WVA release uses the published OCI chart with upstream
+    # defaults (monitoringNamespace: llm-d-monitoring) that don't match OpenShift.
+    local helmfile_selector=""
+    if [ "$DEPLOY_WVA" = "true" ]; then
+      helmfile_selector="--selector kind!=autoscaling"
+      log_info "Skipping WVA in helmfile (already deployed from local chart)"
+    fi
     log_info "Deploying llm-d core components"
-    helmfile apply -e $GATEWAY_PROVIDER -n ${LLMD_NS}
+    helmfile apply -e $GATEWAY_PROVIDER -n ${LLMD_NS} $helmfile_selector
     kubectl apply -f httproute.yaml -n ${LLMD_NS}
 
     # Patch llm-d-inference-scheduler deployment if scale-to-zero is enabled
