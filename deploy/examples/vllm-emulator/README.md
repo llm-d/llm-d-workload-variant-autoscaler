@@ -286,7 +286,7 @@ kubectl delete namespace llm-d-sim
 
 ## Next Steps
 
-- [Load Generator Documentation](../../../tools/vllm-emulator/README.md)
+- [Load Generator Documentation (GuideLLM)](../../../docs/tutorials/guidellm-sample.md)
 - [Testing Guide](../../../docs/developer-guide/testing.md)
 - [HPA Integration](../../../docs/integrations/hpa-integration.md)
 - [Kind Emulator Setup](../../kind-emulator/README.md)
