@@ -41,7 +41,6 @@ This creates:
 - WVA controller
 - llm-d infrastructure (simulation mode)
 - Prometheus monitoring
-- vLLM emulator
 
 ## Configuration Options
 
@@ -176,12 +175,6 @@ kubectl port-forward -n workload-variant-autoscaler-monitoring \
   svc/prometheus-operated 9090:9090
 ```
 
-**Port-forward vLLM emulator:**
-
-```bash
-kubectl port-forward -n llm-d-sim svc/vllme-service 8000:80
-```
-
 **Port-forward Inference Gateway:**
 
 ```bash
@@ -197,19 +190,51 @@ kubectl apply -f ../../config/samples/
 
 ### 3. Generate Load
 
+Deploy a GuideLLM load generation job:
+
 ```bash
-cd ../../tools/vllm-emulator
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run load generator
-python loadgen.py \
-  --model default/default \
-  --rate '[[120, 60]]' \
-  --url http://localhost:8000/v1 \
-  --content 50
+kubectl apply -f - <<EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: guidellm-load-test
+  namespace: llm-d-sim
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: guidellm
+        image: python:3.11-slim
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo 'Installing dependencies...'
+          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+          pip install --no-cache-dir guidellm
+          echo 'Starting benchmark...'
+          guidellm benchmark \
+            --target http://infra-sim-inference-gateway:80 \
+            --rate-type constant \
+            --rate 8 \
+            --max-seconds 600 \
+            --model unsloth/Meta-Llama-3.1-8B \
+            --data prompt_tokens=128,output_tokens=128 \
+            --output-path /tmp/benchmarks.json
+        env:
+        - name: HF_HOME
+          value: /tmp
+EOF
 ```
+
+Adjust parameters, if needed:
+- `--rate`: requests per second
+- `--max-seconds`: duration of the test
+- `--model`: model ID matching your deployment
+- `--data`: input/output token configuration
+
+For more information about the parameters, check the official [GuideLLM repository](https://github.com/vllm-project/guidellm?tab=readme-ov-file#common-use-cases-and-configurations).
 
 ### 4. Monitor
 

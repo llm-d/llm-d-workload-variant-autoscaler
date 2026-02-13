@@ -38,8 +38,6 @@ SKIP_TLS_VERIFY=true  # Skip TLS verification in emulated environments
 WVA_LOG_LEVEL="debug" # WVA log level set to debug for emulated environments
 
 # llm-d Configuration
-LLM_D_INFERENCE_SIM_IMG_REPO=${LLM_D_INFERENCE_SIM_IMG_REPO:-"ghcr.io/llm-d/llm-d-inference-sim"}
-LLM_D_INFERENCE_SIM_IMG_TAG=${LLM_D_INFERENCE_SIM_IMG_TAG:-"latest"}
 LLM_D_MODELSERVICE_NAME="ms-$NAMESPACE_SUFFIX-llm-d-modelservice"
 LLM_D_MODELSERVICE_VALUES="ms-$NAMESPACE_SUFFIX/values.yaml"
 LLM_D_EPP_NAME="gaie-$NAMESPACE_SUFFIX-epp"
@@ -52,7 +50,6 @@ SLO_TPOT=24     # Target time-per-output-token SLO (in ms)
 SLO_TTFT=500  # Target time-to-first-token SLO (in ms)
 
 # Gateway Configuration
-BENCHMARK_MODE="false"  # if true, deploys gateway in benchmark mode - unavailable for simulated deployments
 INSTALL_GATEWAY_CTRLPLANE="true" # if true, installs gateway control plane providers - defaults to true for emulated clusters
 
 # Prometheus Configuration
