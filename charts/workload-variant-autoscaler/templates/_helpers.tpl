@@ -51,6 +51,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Create a name for cluster-scoped resources (ClusterRole, ClusterRoleBinding).
+Appends the release namespace to the fullname to ensure uniqueness when multiple
+installations exist on the same cluster in different namespaces.
+*/}}
+{{- define "workload-variant-autoscaler.clusterResourceName" -}}
+{{- printf "%s-%s" (include "workload-variant-autoscaler.fullname" .) .Release.Namespace | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "workload-variant-autoscaler.serviceAccountName" -}}

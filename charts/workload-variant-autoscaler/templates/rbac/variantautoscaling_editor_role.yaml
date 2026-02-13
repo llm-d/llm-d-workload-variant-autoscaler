@@ -8,7 +8,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "workload-variant-autoscaler.fullname" . }}-variantautoscaling-editor-role
+  name: {{ include "workload-variant-autoscaler.clusterResourceName" . }}-variantautoscaling-editor-role
   labels:
     {{- include "workload-variant-autoscaler.labels" . | nindent 4 }}
 rules:

@@ -2,7 +2,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "workload-variant-autoscaler.fullname" . }}-metrics-auth-role
+  name: {{ include "workload-variant-autoscaler.clusterResourceName" . }}-metrics-auth-role
   labels:
     {{- include "workload-variant-autoscaler.labels" . | nindent 4 }}
 rules:
