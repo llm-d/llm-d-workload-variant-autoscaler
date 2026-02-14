@@ -25,16 +25,13 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/config"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/constants"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/datastore"
-	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/logging"
 )
 
 var _ = Describe("ConfigMapReconciler", func() {
@@ -45,50 +42,16 @@ var _ = Describe("ConfigMapReconciler", func() {
 		ds              datastore.Datastore
 		systemNamespace string
 		testNamespace   string
-		recorder        *record.FakeRecorder
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
-		logging.NewTestLogger()
-		systemNamespace = "workload-variant-autoscaler-system"
-		testNamespace = "test-namespace"
-
-		// Create system namespace
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: systemNamespace,
-			},
-		}
-		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).NotTo(HaveOccurred())
-
-		// Create test namespace
-		testNS := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testNamespace,
-			},
-		}
-		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, testNS))).NotTo(HaveOccurred())
-
-		// Create datastore and config
-		ds = datastore.NewDatastore(config.NewTestConfig())
-
-		// Create config with Prometheus
-		var err error
-		cfg, err = config.NewTestConfigWithPrometheus(ctx, "https://prometheus:9090", k8sClient)
-		Expect(err).NotTo(HaveOccurred())
-
-		// Create recorder
-		recorder = record.NewFakeRecorder(100)
-
-		// Create reconciler
-		reconciler = &ConfigMapReconciler{
-			Client:    k8sClient,
-			Scheme:    runtime.NewScheme(),
-			Config:    cfg,
-			Datastore: ds,
-			Recorder:  recorder,
-		}
+		setup := setupConfigMapReconcilerTest("workload-variant-autoscaler-system", "test-namespace")
+		ctx = setup.ctx
+		cfg = setup.cfg
+		ds = setup.ds
+		reconciler = setup.reconciler
+		systemNamespace = setup.systemNamespace
+		testNamespace = setup.testNamespace
 	})
 
 	Context("Reconcile - Global ConfigMaps", func() {
@@ -103,7 +66,11 @@ var _ = Describe("ConfigMapReconciler", func() {
 					"default": "kvCacheThreshold: 0.75\nqueueLengthThreshold: 5\nkvSpareTrigger: 0.10\nqueueSpareTrigger: 3",
 				},
 			}
-			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, cm))).To(Succeed())
+			currentCM := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cm.Name, Namespace: cm.Namespace}, currentCM)).To(Succeed())
+			currentCM.Data = cm.Data
+			Expect(k8sClient.Update(ctx, currentCM)).To(Succeed())
 
 			By("Reconciling the ConfigMap")
 			req := ctrl.Request{
@@ -137,7 +104,11 @@ var _ = Describe("ConfigMapReconciler", func() {
 					"model1":  "model_id: model1\nenable_scale_to_zero: true\nretention_period: 10m",
 				},
 			}
-			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, cm))).To(Succeed())
+			currentCM := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cm.Name, Namespace: cm.Namespace}, currentCM)).To(Succeed())
+			currentCM.Data = cm.Data
+			Expect(k8sClient.Update(ctx, currentCM)).To(Succeed())
 
 			By("Reconciling the ConfigMap")
 			req := ctrl.Request{
@@ -160,33 +131,6 @@ var _ = Describe("ConfigMapReconciler", func() {
 			Expect(model1Config.RetentionPeriod).To(Equal("10m"))
 		})
 
-		It("should handle main ConfigMap with mutable parameters", func() {
-			By("Creating a main ConfigMap")
-			cm := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      config.ConfigMapName(),
-					Namespace: systemNamespace,
-				},
-				Data: map[string]string{
-					"GLOBAL_OPT_INTERVAL": "30s",
-				},
-			}
-			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, cm))).NotTo(HaveOccurred())
-
-			By("Reconciling the ConfigMap")
-			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      cm.Name,
-					Namespace: cm.Namespace,
-				},
-			}
-			result, err := reconciler.Reconcile(ctx, req)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(ctrl.Result{}))
-
-			By("Verifying the optimization interval was updated")
-			Expect(cfg.OptimizationInterval()).To(Equal(30 * time.Second))
-		})
 	})
 
 	Context("Reconcile - Namespace-Local ConfigMaps", func() {
@@ -410,7 +354,7 @@ var _ = Describe("ConfigMapReconciler", func() {
 			// Create config with watch namespace
 			Expect(os.Setenv("WATCH_NAMESPACE", watchedNamespace)).To(Succeed())
 			var err error
-			cfg, err = config.NewTestConfigWithPrometheus(ctx, "https://prometheus:9090", k8sClient)
+			cfg, err = newTestConfigWithPrometheus("https://prometheus:9090")
 			Expect(err).NotTo(HaveOccurred())
 
 			// Update reconciler with new config
@@ -536,24 +480,5 @@ var _ = Describe("ConfigMapReconciler", func() {
 			Expect(result).To(Equal(ctrl.Result{}))
 		})
 
-		It("should return error if config is nil", func() {
-			By("Creating reconciler with nil config")
-			badReconciler := &ConfigMapReconciler{
-				Client:    k8sClient,
-				Config:    nil,
-				Datastore: ds,
-			}
-
-			By("Attempting to reconcile")
-			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      "test-cm",
-					Namespace: systemNamespace,
-				},
-			}
-			_, err := badReconciler.Reconcile(ctx, req)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("config is nil"))
-		})
 	})
 })

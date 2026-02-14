@@ -1,58 +1,47 @@
 package config
 
 import (
-	"bytes"
-	"context"
 	"fmt"
 	"time"
 
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
-	"gopkg.in/yaml.v3"
-	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	interfaces "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
-	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils"
 )
 
-const (
-	// defaultOptimizationInterval is the default optimization interval used when
-	// GLOBAL_OPT_INTERVAL is not specified in the ConfigMap.
-	defaultOptimizationInterval = 60 * time.Second
-)
-
-// flagBindings maps viper keys (= env var names = ConfigMap keys) to pflag names.
+// flagBindings maps viper keys (= env var names = config file keys) to pflag names.
 var flagBindings = map[string]string{
-	"METRICS_BIND_ADDRESS":               "metrics-bind-address",
-	"HEALTH_PROBE_BIND_ADDRESS":          "health-probe-bind-address",
-	"LEADER_ELECT":                       "leader-elect",
-	"LEADER_ELECTION_LEASE_DURATION":     "leader-election-lease-duration",
-	"LEADER_ELECTION_RENEW_DEADLINE":     "leader-election-renew-deadline",
-	"LEADER_ELECTION_RETRY_PERIOD":       "leader-election-retry-period",
-	"REST_CLIENT_TIMEOUT":                "rest-client-timeout",
-	"METRICS_SECURE":                     "metrics-secure",
-	"ENABLE_HTTP2":                       "enable-http2",
-	"WATCH_NAMESPACE":                    "watch-namespace",
-	"V":                                  "v",
-	"WEBHOOK_CERT_PATH":                  "webhook-cert-path",
-	"WEBHOOK_CERT_NAME":                  "webhook-cert-name",
-	"WEBHOOK_CERT_KEY":                   "webhook-cert-key",
-	"METRICS_CERT_PATH":                  "metrics-cert-path",
-	"METRICS_CERT_NAME":                  "metrics-cert-name",
-	"METRICS_CERT_KEY":                   "metrics-cert-key",
+	"METRICS_BIND_ADDRESS":           "metrics-bind-address",
+	"HEALTH_PROBE_BIND_ADDRESS":      "health-probe-bind-address",
+	"LEADER_ELECT":                   "leader-elect",
+	"LEADER_ELECTION_LEASE_DURATION": "leader-election-lease-duration",
+	"LEADER_ELECTION_RENEW_DEADLINE": "leader-election-renew-deadline",
+	"LEADER_ELECTION_RETRY_PERIOD":   "leader-election-retry-period",
+	"REST_CLIENT_TIMEOUT":            "rest-client-timeout",
+	"METRICS_SECURE":                 "metrics-secure",
+	"ENABLE_HTTP2":                   "enable-http2",
+	"WATCH_NAMESPACE":                "watch-namespace",
+	"V":                              "v",
+	"WEBHOOK_CERT_PATH":              "webhook-cert-path",
+	"WEBHOOK_CERT_NAME":              "webhook-cert-name",
+	"WEBHOOK_CERT_KEY":               "webhook-cert-key",
+	"METRICS_CERT_PATH":              "metrics-cert-path",
+	"METRICS_CERT_NAME":              "metrics-cert-name",
+	"METRICS_CERT_KEY":               "metrics-cert-key",
 }
 
 // Load loads and validates the unified configuration.
-// Precedence: flags > env > ConfigMap > defaults
+// Precedence: flags > env > config file > defaults
+// The main configuration is read from a mounted YAML file, but can be overridden
+// by environment variables or command-line flags.
+// Returns the loaded Config object.
 // Returns error if required configuration is missing or invalid (fail-fast).
 // flagSet may be nil (e.g. in tests that don't set CLI flags).
-func Load(ctx context.Context, flagSet *flag.FlagSet, k8sClient client.Client) (*Config, error) {
+func Load(flagSet *flag.FlagSet, configFilePath string) (*Config, error) {
 	cfg := &Config{}
 
-	// Load configuration (flags > env > ConfigMap > defaults)
-	if err := loadConfig(ctx, cfg, flagSet, k8sClient); err != nil {
+	// Load configuration (flags > env > config file > defaults)
+	if err := loadConfig(cfg, flagSet, configFilePath); err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
@@ -65,8 +54,8 @@ func Load(ctx context.Context, flagSet *flag.FlagSet, k8sClient client.Client) (
 	return cfg, nil
 }
 
-// loadConfig loads configuration with precedence: flags > env > ConfigMap > defaults
-func loadConfig(ctx context.Context, cfg *Config, flagSet *flag.FlagSet, k8sClient client.Client) error {
+// loadConfig loads configuration with precedence: flags > env > config file > defaults
+func loadConfig(cfg *Config, flagSet *flag.FlagSet, configFilePath string) error {
 	cfg.mu.Lock()
 	defer cfg.mu.Unlock()
 
@@ -95,28 +84,18 @@ func loadConfig(ctx context.Context, cfg *Config, flagSet *flag.FlagSet, k8sClie
 	v.SetDefault("WVA_LIMITED_MODE", false)
 	v.SetDefault("SCALE_FROM_ZERO_ENGINE_MAX_CONCURRENCY", 10)
 	v.SetDefault("EPP_METRIC_READER_BEARER_TOKEN", "")
+	v.SetDefault("GLOBAL_OPT_INTERVAL", "60s")
 
-	// Load from ConfigMap (if available) — sits between env and defaults in precedence
-	cmName := ConfigMapName()
-	cmNamespace := SystemNamespace()
-	cm := &corev1.ConfigMap{}
-	if err := utils.GetConfigMapWithBackoff(ctx, k8sClient, cmName, cmNamespace, cm); err == nil {
-		ctrl.Log.Info("Loaded ConfigMap for config", "name", cmName, "namespace", cmNamespace)
-		if len(cm.Data) > 0 {
-			buf := new(bytes.Buffer)
-			for k, val := range cm.Data {
-				fmt.Fprintf(buf, "%s=%s\n", k, val)
-			}
-			v.SetConfigType("dotenv")
-			if err := v.ReadConfig(buf); err != nil {
-				ctrl.Log.Info("Failed to parse ConfigMap data into viper", "error", err)
-			}
+	// Load from config file (mounted in the container) — sits between env and defaults in precedence
+	if configFilePath != "" {
+		v.SetConfigFile(configFilePath)
+		if err := v.ReadInConfig(); err != nil {
+			return fmt.Errorf("failed to read config file %s: %w", configFilePath, err)
 		}
-	} else {
-		ctrl.Log.Info("ConfigMap not found, using defaults and flags", "name", cmName, "namespace", cmNamespace, "error", err)
+		ctrl.Log.Info("Loaded config from file", "path", configFilePath)
 	}
 
-	// Bind environment variables (precedence above config, below flags)
+	// Bind environment variables (precedence above config file, below flags)
 	v.AutomaticEnv()
 
 	// Bind pflag flags (highest precedence for explicitly-set flags)
@@ -142,6 +121,7 @@ func loadConfig(ctx context.Context, cfg *Config, flagSet *flag.FlagSet, k8sClie
 		enableHTTP2:          v.GetBool("ENABLE_HTTP2"),
 		watchNamespace:       v.GetString("WATCH_NAMESPACE"),
 		loggerVerbosity:      v.GetInt("V"),
+		optimizationInterval: v.GetDuration("GLOBAL_OPT_INTERVAL"),
 	}
 
 	cfg.tls = tlsConfig{
@@ -151,10 +131,6 @@ func loadConfig(ctx context.Context, cfg *Config, flagSet *flag.FlagSet, k8sClie
 		metricsCertPath: v.GetString("METRICS_CERT_PATH"),
 		metricsCertName: v.GetString("METRICS_CERT_NAME"),
 		metricsCertKey:  v.GetString("METRICS_CERT_KEY"),
-	}
-
-	cfg.optimization = optimizationConfig{
-		interval: defaultOptimizationInterval,
 	}
 
 	cfg.features = featureFlagsConfig{
@@ -173,90 +149,68 @@ func loadConfig(ctx context.Context, cfg *Config, flagSet *flag.FlagSet, k8sClie
 		namespaceConfigs: make(map[string]ScaleToZeroConfigData),
 	}
 
-	cfg.prometheus.cache = defaultPrometheusCacheConfig()
+	// Prometheus cache config from config file / env / defaults
+	cfg.prometheus.cache = parsePrometheusCacheConfigFromViper(v)
 
 	cfg.epp.metricReaderBearerToken = v.GetString("EPP_METRIC_READER_BEARER_TOKEN")
 
-	// Load Prometheus config (required) - env > ConfigMap
-	promConfig, err := PrometheusConfig(ctx, k8sClient)
-	if err != nil {
-		return fmt.Errorf("failed to load Prometheus config: %w", err)
+	// Prometheus connection config from config file / env
+	promBaseURL := v.GetString("PROMETHEUS_BASE_URL")
+	if promBaseURL == "" {
+		return fmt.Errorf("prometheus configuration is required but not found. " +
+			"set PROMETHEUS_BASE_URL in config file or environment variable")
 	}
-	if promConfig == nil {
-		return fmt.Errorf("prometheus configuration is required but not found. set PROMETHEUS_BASE_URL environment variable or configure via ConfigMap")
-	}
-	cfg.prometheus.baseURL = promConfig.BaseURL
-	cfg.prometheus.bearerToken = promConfig.BearerToken
-	cfg.prometheus.tokenPath = promConfig.TokenPath
-	cfg.prometheus.insecureSkipVerify = promConfig.InsecureSkipVerify
-	cfg.prometheus.caCertPath = promConfig.CACertPath
-	cfg.prometheus.clientCertPath = promConfig.ClientCertPath
-	cfg.prometheus.clientKeyPath = promConfig.ClientKeyPath
-	cfg.prometheus.serverName = promConfig.ServerName
-
-	// Load dynamic config
-	return loadDynamicConfigNew(ctx, cfg, k8sClient)
+	cfg.prometheus.baseURL = promBaseURL
+	cfg.prometheus.bearerToken = v.GetString("PROMETHEUS_BEARER_TOKEN")
+	cfg.prometheus.tokenPath = v.GetString("PROMETHEUS_TOKEN_PATH")
+	cfg.prometheus.insecureSkipVerify = v.GetBool("PROMETHEUS_TLS_INSECURE_SKIP_VERIFY")
+	cfg.prometheus.caCertPath = v.GetString("PROMETHEUS_CA_CERT_PATH")
+	cfg.prometheus.clientCertPath = v.GetString("PROMETHEUS_CLIENT_CERT_PATH")
+	cfg.prometheus.clientKeyPath = v.GetString("PROMETHEUS_CLIENT_KEY_PATH")
+	cfg.prometheus.serverName = v.GetString("PROMETHEUS_SERVER_NAME")
+	return nil
 }
 
-// loadDynamicConfigNew loads dynamic configuration
-func loadDynamicConfigNew(ctx context.Context, cfg *Config, k8sClient client.Client) error {
-	// Load optimization interval
-	cm := &corev1.ConfigMap{}
-	cmName := ConfigMapName()
-	cmNamespace := SystemNamespace()
-	if err := utils.GetConfigMapWithBackoff(ctx, k8sClient, cmName, cmNamespace, cm); err == nil {
-		if intervalStr, ok := cm.Data["GLOBAL_OPT_INTERVAL"]; ok {
-			if interval, err := time.ParseDuration(intervalStr); err == nil {
-				cfg.optimization.interval = interval
-			} else {
-				ctrl.Log.Info("Invalid GLOBAL_OPT_INTERVAL, using default", "value", intervalStr, "error", err)
-			}
-		}
+// parsePrometheusCacheConfigFromViper reads Prometheus cache configuration from
+// a viper instance (which may have loaded values from file, env, or defaults).
+func parsePrometheusCacheConfigFromViper(v *viper.Viper) *CacheConfig {
+	defaults := defaultPrometheusCacheConfig()
+
+	config := &CacheConfig{
+		TTL:                 parseDurationOrDefault(v.GetString("PROMETHEUS_METRICS_CACHE_TTL"), defaults.TTL),
+		CleanupInterval:     parseDurationOrDefault(v.GetString("PROMETHEUS_METRICS_CACHE_CLEANUP_INTERVAL"), defaults.CleanupInterval),
+		FetchInterval:       parseDurationOrDefault(v.GetString("PROMETHEUS_METRICS_CACHE_FETCH_INTERVAL"), defaults.FetchInterval),
+		FreshnessThresholds: DefaultFreshnessThresholds(),
 	}
 
-	// Load Prometheus cache config
-	if cacheConfig, err := ReadPrometheusCacheConfig(ctx, k8sClient); err == nil && cacheConfig != nil {
-		cfg.prometheus.cache = cacheConfig
+	if t := v.GetString("PROMETHEUS_METRICS_CACHE_FRESH_THRESHOLD"); t != "" {
+		config.FreshnessThresholds.FreshThreshold = parseDurationOrDefault(t, defaults.FreshnessThresholds.FreshThreshold)
+	}
+	if t := v.GetString("PROMETHEUS_METRICS_CACHE_STALE_THRESHOLD"); t != "" {
+		config.FreshnessThresholds.StaleThreshold = parseDurationOrDefault(t, defaults.FreshnessThresholds.StaleThreshold)
+	}
+	if t := v.GetString("PROMETHEUS_METRICS_CACHE_UNAVAILABLE_THRESHOLD"); t != "" {
+		config.FreshnessThresholds.UnavailableThreshold = parseDurationOrDefault(t, defaults.FreshnessThresholds.UnavailableThreshold)
 	}
 
-	// Load scale-to-zero config (global)
-	scaleToZeroCM := &corev1.ConfigMap{}
-	scaleToZeroCMName := DefaultScaleToZeroConfigMapName
-	if err := utils.GetConfigMapWithBackoff(ctx, k8sClient, scaleToZeroCMName, cmNamespace, scaleToZeroCM); err == nil {
-		cfg.scaleToZero.global = ParseScaleToZeroConfigMap(scaleToZeroCM.Data)
-	}
+	return config
+}
 
-	// Load saturation scaling config (global)
-	saturationCM := &corev1.ConfigMap{}
-	saturationCMName := SaturationConfigMapName()
-	if err := utils.GetConfigMapWithBackoff(ctx, k8sClient, saturationCMName, cmNamespace, saturationCM); err == nil {
-		configs := make(map[string]interfaces.SaturationScalingConfig)
-		for key, yamlStr := range saturationCM.Data {
-			var satConfig interfaces.SaturationScalingConfig
-			if err := yaml.Unmarshal([]byte(yamlStr), &satConfig); err != nil {
-				ctrl.Log.Info("Failed to parse saturation scaling config entry", "key", key, "error", err)
-				continue
-			}
-			// Validate
-			if err := satConfig.Validate(); err != nil {
-				ctrl.Log.Info("Invalid saturation scaling config entry", "key", key, "error", err)
-				continue
-			}
-			configs[key] = satConfig
-		}
-		if len(configs) > 0 {
-			cfg.saturation.global = configs
-			ctrl.Log.Info("Loaded saturation scaling config", "entries", len(configs))
-		}
+// parseDurationOrDefault parses a duration string and returns the default if parsing fails.
+func parseDurationOrDefault(s string, def time.Duration) time.Duration {
+	if s == "" {
+		return def
 	}
-
-	return nil
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return def
+	}
+	return d
 }
 
 // defaultPrometheusCacheConfig returns default Prometheus cache configuration
 func defaultPrometheusCacheConfig() *CacheConfig {
 	return &CacheConfig{
-		Enabled:             true,
 		TTL:                 30 * time.Second,
 		CleanupInterval:     1 * time.Minute,
 		FetchInterval:       30 * time.Second,

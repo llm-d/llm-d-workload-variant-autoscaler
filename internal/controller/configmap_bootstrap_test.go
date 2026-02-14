@@ -1,0 +1,107 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/config"
+)
+
+var _ = Describe("ConfigMap Bootstrap", func() {
+	var (
+		reconciler      *ConfigMapReconciler
+		ctx             context.Context
+		cfg             *config.Config
+		systemNamespace string
+	)
+
+	BeforeEach(func() {
+		setup := setupConfigMapReconcilerTest("workload-variant-autoscaler-system", "")
+		ctx = setup.ctx
+		cfg = setup.cfg
+		reconciler = setup.reconciler
+		systemNamespace = setup.systemNamespace
+	})
+
+	It("should bootstrap global secondary ConfigMaps and mark config sync complete", func() {
+		By("Creating global saturation and scale-to-zero ConfigMaps")
+		saturationCM := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      config.SaturationConfigMapName(),
+				Namespace: systemNamespace,
+			},
+			Data: map[string]string{
+				"default": "kvCacheThreshold: 0.70\nqueueLengthThreshold: 8\nkvSpareTrigger: 0.15\nqueueSpareTrigger: 5",
+			},
+		}
+		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, saturationCM))).To(Succeed())
+		currentSaturationCM := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: saturationCM.Name, Namespace: saturationCM.Namespace}, currentSaturationCM)).To(Succeed())
+		currentSaturationCM.Data = saturationCM.Data
+		Expect(k8sClient.Update(ctx, currentSaturationCM)).To(Succeed())
+
+		scaleToZeroCM := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      config.DefaultScaleToZeroConfigMapName,
+				Namespace: systemNamespace,
+			},
+			Data: map[string]string{
+				"default": "enable_scale_to_zero: true\nretention_period: 5m",
+			},
+		}
+		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, scaleToZeroCM))).To(Succeed())
+		currentScaleToZeroCM := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: scaleToZeroCM.Name, Namespace: scaleToZeroCM.Namespace}, currentScaleToZeroCM)).To(Succeed())
+		currentScaleToZeroCM.Data = scaleToZeroCM.Data
+		Expect(k8sClient.Update(ctx, currentScaleToZeroCM)).To(Succeed())
+
+		By("Bootstrapping configmaps")
+		Expect(reconciler.BootstrapInitialConfigMaps(ctx)).To(Succeed())
+
+		By("Verifying bootstrap readiness state")
+		Expect(cfg.ConfigMapsBootstrapComplete()).To(BeTrue())
+
+		By("Verifying saturation config was loaded")
+		satConfigMap := cfg.SaturationConfig()
+		satConfig, exists := satConfigMap["default"]
+		Expect(exists).To(BeTrue())
+		Expect(satConfig.KvCacheThreshold).To(BeNumerically("~", 0.70, 0.01))
+
+		By("Verifying scale-to-zero config was loaded")
+		s2zConfig := cfg.ScaleToZeroConfig()
+		defaultModel, exists := s2zConfig["default"]
+		Expect(exists).To(BeTrue())
+		Expect(defaultModel.EnableScaleToZero).NotTo(BeNil())
+		Expect(*defaultModel.EnableScaleToZero).To(BeTrue())
+	})
+
+	It("should mark sync complete when optional ConfigMaps are absent", func() {
+		By("Bootstrapping with no configmaps present")
+		Expect(reconciler.BootstrapInitialConfigMaps(ctx)).To(Succeed())
+
+		By("Verifying bootstrap readiness state")
+		Expect(cfg.ConfigMapsBootstrapComplete()).To(BeTrue())
+	})
+})

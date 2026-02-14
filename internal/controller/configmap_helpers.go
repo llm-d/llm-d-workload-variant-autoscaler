@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"time"
 
 	"github.com/go-logr/logr"
 	yaml "gopkg.in/yaml.v3"
@@ -29,50 +28,6 @@ import (
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/constants"
 	interfaces "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
 )
-
-// handleMutableParameters processes mutable configuration parameters from ConfigMap data.
-// Filters out immutable keys and updates the Config object accordingly.
-func handleMutableParameters(ctx context.Context, cfg *config.Config, cmData map[string]string, immutableKeys map[string]bool, logger logr.Logger) {
-	// Optimization Config (Global Interval) - mutable parameter
-	if interval, ok := cmData["GLOBAL_OPT_INTERVAL"]; ok && !immutableKeys["GLOBAL_OPT_INTERVAL"] {
-		if parsedInterval, err := time.ParseDuration(interval); err == nil {
-			cfg.UpdateOptimizationInterval(parsedInterval)
-			logger.Info("Updated global optimization config from ConfigMap", "interval", interval)
-		} else {
-			logger.Error(err, "Invalid GLOBAL_OPT_INTERVAL in ConfigMap", "value", interval)
-		}
-	}
-
-	// Prometheus cache configuration - mutable parameter
-	// Check if any cache config keys are present and not in immutable keys
-	cacheConfigKeys := []string{
-		"PROMETHEUS_METRICS_CACHE_ENABLED",
-		"PROMETHEUS_METRICS_CACHE_TTL",
-		"PROMETHEUS_METRICS_CACHE_CLEANUP_INTERVAL",
-		"PROMETHEUS_METRICS_CACHE_FETCH_INTERVAL",
-		"PROMETHEUS_METRICS_CACHE_FRESH_THRESHOLD",
-		"PROMETHEUS_METRICS_CACHE_STALE_THRESHOLD",
-		"PROMETHEUS_METRICS_CACHE_UNAVAILABLE_THRESHOLD",
-	}
-	hasCacheConfig := false
-	for _, key := range cacheConfigKeys {
-		if _, ok := cmData[key]; ok && !immutableKeys[key] {
-			hasCacheConfig = true
-			break
-		}
-	}
-	if hasCacheConfig {
-		// Parse and update Prometheus cache config
-		cacheConfig := config.ParsePrometheusCacheConfigFromData(cmData)
-		if cacheConfig != nil {
-			cfg.UpdatePrometheusCacheConfig(cacheConfig)
-			logger.Info("Updated Prometheus cache config from ConfigMap",
-				"enabled", cacheConfig.Enabled,
-				"ttl", cacheConfig.TTL,
-				"fetchInterval", cacheConfig.FetchInterval)
-		}
-	}
-}
 
 // parseSaturationConfig parses saturation scaling configuration from ConfigMap data.
 // Returns the parsed configs and count of successfully parsed entries.
@@ -99,7 +54,7 @@ func parseSaturationConfig(cmData map[string]string, logger logr.Logger) (config
 // isNamespaceConfigEnabled checks if a namespace has the opt-in label for namespace-local ConfigMaps.
 // This allows namespaces to opt-in for ConfigMap watching even before VAs are created.
 // Package-level function so it can be used by both reconcilers.
-func isNamespaceConfigEnabled(ctx context.Context, c client.Client, namespace string) bool {
+func isNamespaceConfigEnabled(ctx context.Context, c client.Reader, namespace string) bool {
 	if namespace == "" {
 		return false
 	}
@@ -124,7 +79,7 @@ func isNamespaceConfigEnabled(ctx context.Context, c client.Client, namespace st
 // Excluded namespaces are not watched for ConfigMaps or reconciled for VAs.
 // Thread-safe (reads namespace object from API server).
 // Package-level function so it can be used by both reconcilers.
-func isNamespaceExcluded(ctx context.Context, c client.Client, namespace string) bool {
+func isNamespaceExcluded(ctx context.Context, c client.Reader, namespace string) bool {
 	if namespace == "" {
 		return false
 	}

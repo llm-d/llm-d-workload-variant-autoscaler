@@ -16,7 +16,6 @@ import (
 // are thread-safe and don't cause race conditions or data corruption.
 func TestConfig_ThreadSafeUpdates(t *testing.T) {
 	cfg := NewTestConfig()
-	cfg.UpdateOptimizationInterval(30 * time.Second)
 
 	const (
 		numReaders = 10
@@ -70,9 +69,6 @@ func TestConfig_ThreadSafeUpdates(t *testing.T) {
 		go func(writerID int) {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
-				// Update optimization interval
-				newInterval := time.Duration(30+j) * time.Second
-				cfg.UpdateOptimizationInterval(newInterval)
 
 				// Update saturation config
 				newSatConfig := make(map[string]interfaces.SaturationScalingConfig)
@@ -121,7 +117,6 @@ func TestConfig_ThreadSafeUpdates(t *testing.T) {
 // TestConfig_ThreadSafeConcurrentReads tests that multiple concurrent reads don't block each other.
 func TestConfig_ThreadSafeConcurrentReads(t *testing.T) {
 	cfg := NewTestConfig()
-	cfg.UpdateOptimizationInterval(60 * time.Second)
 
 	const numReaders = 50
 	var wg sync.WaitGroup
@@ -156,66 +151,12 @@ func TestConfig_ThreadSafeConcurrentReads(t *testing.T) {
 	assert.Less(t, duration, 100*time.Millisecond, "Concurrent reads should complete quickly")
 }
 
-// TestConfig_ThreadSafeReadDuringWrite tests that reads can still happen during writes,
-// but writes are serialized.
-func TestConfig_ThreadSafeReadDuringWrite(t *testing.T) {
-	cfg := NewTestConfig()
-	cfg.UpdateOptimizationInterval(30 * time.Second)
-
-	var (
-		readCount  int64
-		writeCount int64
-		wg         sync.WaitGroup
-		done       = make(chan struct{})
-	)
-
-	// Writer goroutine that continuously updates
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 100; i++ {
-			cfg.UpdateOptimizationInterval(time.Duration(30+i) * time.Second)
-			atomic.AddInt64(&writeCount, 1)
-			time.Sleep(time.Millisecond)
-		}
-		close(done)
-	}()
-
-	// Reader goroutines that read while writes are happening
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-done:
-					return
-				default:
-					interval := cfg.OptimizationInterval()
-					if interval > 0 {
-						atomic.AddInt64(&readCount, 1)
-					}
-					time.Sleep(time.Microsecond)
-				}
-			}
-		}()
-	}
-
-	wg.Wait()
-
-	// Verify both reads and writes happened
-	assert.Greater(t, atomic.LoadInt64(&readCount), int64(0), "Should have performed reads")
-	assert.Equal(t, int64(100), atomic.LoadInt64(&writeCount), "Should have performed all writes")
-}
-
 // TestDetectImmutableParameterChanges tests that attempts to change immutable parameters
 // are correctly detected.
 func TestDetectImmutableParameterChanges(t *testing.T) {
 	// Create initial config with Prometheus URL
 	initialConfig := NewTestConfig()
-	initialConfig.setPrometheusConfigForTesting(&interfaces.PrometheusConfig{
-		BaseURL: "https://prometheus-initial:9090",
-	})
+	initialConfig.setPrometheusBaseURLForTesting("https://prometheus-initial:9090")
 
 	tests := []struct {
 		name        string
@@ -332,9 +273,7 @@ func TestDetectImmutableParameterChanges_NoInitialConfig(t *testing.T) {
 // TestDetectImmutableParameterChanges_EmptyConfigMap tests that empty ConfigMap doesn't trigger errors.
 func TestDetectImmutableParameterChanges_EmptyConfigMap(t *testing.T) {
 	initialConfig := NewTestConfig()
-	initialConfig.setPrometheusConfigForTesting(&interfaces.PrometheusConfig{
-		BaseURL: "https://prometheus:9090",
-	})
+	initialConfig.setPrometheusBaseURLForTesting("https://prometheus:9090")
 
 	configMap := map[string]string{}
 
@@ -346,9 +285,7 @@ func TestDetectImmutableParameterChanges_EmptyConfigMap(t *testing.T) {
 // TestDetectImmutableParameterChanges_OnlyMutable tests that only mutable parameters don't trigger errors.
 func TestDetectImmutableParameterChanges_OnlyMutable(t *testing.T) {
 	initialConfig := NewTestConfig()
-	initialConfig.setPrometheusConfigForTesting(&interfaces.PrometheusConfig{
-		BaseURL: "https://prometheus:9090",
-	})
+	initialConfig.setPrometheusBaseURLForTesting("https://prometheus:9090")
 
 	// Only mutable parameters
 	configMap := map[string]string{

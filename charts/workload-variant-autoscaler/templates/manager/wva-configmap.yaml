@@ -10,106 +10,45 @@ metadata:
 immutable: true
 {{- end }}
 data:
-  # ============================================================================
-  # UNIFIED CONFIGURATION SYSTEM
-  # ============================================================================
-  # This ConfigMap contains both static (immutable) and dynamic (mutable) settings.
+  # The main configuration is stored as a single YAML file (config.yaml) that is
+  # volume-mounted into the controller container at /etc/wva/config.yaml.
   #
-  # IMMUTABLE PARAMETERS (require controller restart to change):
-  #   - PROMETHEUS_BASE_URL: Prometheus connection endpoint
-  #   - TLS certificate paths (security-sensitive)
-  #   - Metrics/Probe bind addresses (infrastructure)
-  #   - Leader election ID (coordination)
+  # Precedence: CLI flags > environment variables > config file > defaults
   #
-  # MUTABLE PARAMETERS (can be changed at runtime via ConfigMap updates):
-  #   - GLOBAL_OPT_INTERVAL: Optimization interval
-  #   - WVA_SCALE_TO_ZERO: Feature flag (can be changed, but may require restart for full effect)
-  #   - Prometheus cache settings
-  #
-  # Attempts to change immutable parameters at runtime will be rejected and emit
-  # Warning events. See documentation for details.
-  # ============================================================================
+  # For more information see:
+  # https://github.com/llm-d/llm-d-workload-variant-autoscaler/blob/main/docs/user-guide/configuration.md
+  config.yaml: |
+    # Prometheus Configuration (REQUIRED)
+    # Base URL for Prometheus API (must use HTTPS).
+    PROMETHEUS_BASE_URL: {{ .Values.wva.prometheus.baseURL | quote }}
+    # Filesystem path to the CA certificate used to verify Prometheus TLS cert.
+    PROMETHEUS_CA_CERT_PATH: {{ .Values.wva.prometheus.tls.caCertPath | default "/etc/ssl/certs/prometheus-ca.crt" | quote }}
+    # Whether to skip TLS certificate verification when connecting to Prometheus.
+    PROMETHEUS_TLS_INSECURE_SKIP_VERIFY: {{ if and .Values.wva.prometheus.tls (hasKey .Values.wva.prometheus.tls "insecureSkipVerify") }}{{ .Values.wva.prometheus.tls.insecureSkipVerify | quote }}{{ else }}"true"{{ end }}
 
-  # ----------------------------------------------------------------------------
-  # IMMUTABLE: Prometheus Configuration (requires restart to change)
-  # ----------------------------------------------------------------------------
-  # REQUIRED: Set your Prometheus server URL
-  # Examples:
-  # - General: "https://prometheus:9090"
-  # - OpenShift: "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
-  # - KIND cluster: "https://kube-prometheus-stack-prometheus.workload-variant-autoscaler-monitoring.svc.cluster.local:9090"
-  #PROMETHEUS_BASE_URL: "https://kube-prometheus-stack-prometheus.workload-variant-autoscaler-monitoring.svc.cluster.local:9090"
-  PROMETHEUS_BASE_URL: {{ .Values.wva.prometheus.baseURL | quote }}
+    # EPP Integration
+    # Bearer token used to authenticate metric reads from EPP.
+    EPP_METRIC_READER_BEARER_TOKEN: ""
 
-  # TLS Configuration (TLS is always enabled for HTTPS-only support)
-  # PROMETHEUS_TLS_INSECURE_SKIP_VERIFY: "true"  # Skip certificate verification (development/testing only)
-  PROMETHEUS_CA_CERT_PATH: {{ .Values.wva.prometheus.tls.caCertPath | default "/etc/ssl/certs/prometheus-ca.crt" | quote }}   # CA certificate for server validation
-  # PROMETHEUS_CLIENT_CERT_PATH: "/path/to/client.crt"  # Client certificate for mutual TLS
-  # PROMETHEUS_CLIENT_KEY_PATH: "/path/to/client.key"   # Client private key for mutual TLS
-  # PROMETHEUS_SERVER_NAME: "prometheus.example.com"    # Expected server name for SNI
-  PROMETHEUS_TLS_INSECURE_SKIP_VERIFY: {{ if and .Values.wva.prometheus.tls (hasKey .Values.wva.prometheus.tls "insecureSkipVerify") }}{{ .Values.wva.prometheus.tls.insecureSkipVerify | quote }}{{ else }}"true"{{ end }}
+    # Optimization
+    # Global optimization loop interval for autoscaling decisions.
+    GLOBAL_OPT_INTERVAL: {{ .Values.wva.reconcileInterval | quote }}
 
-  # Authentication Configuration (BearerToken takes precedence over TokenPath)
-  # PROMETHEUS_BEARER_TOKEN: "your-token-here"           # Direct bearer token (development/testing)
-  # PROMETHEUS_TOKEN_PATH: "/path/to/token/file"        # Path to bearer token file (production with mounted secrets)
+    # Feature Flags
+    # Enables scale-to-zero behavior across managed workloads.
+    WVA_SCALE_TO_ZERO: {{ .Values.wva.scaleToZero | default "false" | quote }}
 
-  # ----------------------------------------------------------------------------
-  # MUTABLE: EPP Integration Configuration (runtime-updatable)
-  # ----------------------------------------------------------------------------
-  # EPP metric reader bearer token for pod scraping
-  EPP_METRIC_READER_BEARER_TOKEN: ""
-
-  # ----------------------------------------------------------------------------
-  # MUTABLE: Optimization Configuration (runtime-updatable)
-  # ----------------------------------------------------------------------------
-  # Global optimization interval - how often the controller runs optimization cycles
-  # Can be changed at runtime via ConfigMap updates (no restart required)
-  GLOBAL_OPT_INTERVAL: {{ .Values.wva.reconcileInterval | quote }}
-
-  # ----------------------------------------------------------------------------
-  # MUTABLE: Feature Flags (runtime-updatable, but may require restart for full effect)
-  # ----------------------------------------------------------------------------
-  # Option to scale variants to zero replicas (default: false)
-  # Note: While this can be changed at runtime, some features may require restart
-  WVA_SCALE_TO_ZERO: {{ .Values.wva.scaleToZero | default "false" | quote }}
-
-  # ----------------------------------------------------------------------------
-  # MUTABLE: Prometheus Metrics Cache Configuration (runtime-updatable)
-  # ----------------------------------------------------------------------------
-  # Each collector (Prometheus, EPP, etc.) has its own cache configuration
-  # Enable/disable Prometheus metrics caching (default: "true") - this is for debugging purposes, can be removed in the future
-  PROMETHEUS_METRICS_CACHE_ENABLED: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.enabled | default "true" | quote }}{{ else }}"true"{{ end }}
-  # Prometheus cache TTL - how long metrics are cached before expiring (default: "30s")
-  PROMETHEUS_METRICS_CACHE_TTL: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.ttl | default "30s" | quote }}{{ else }}"30s"{{ end }}
-  # Interval for background cleanup of expired Prometheus cache entries (default: "1m")
-  PROMETHEUS_METRICS_CACHE_CLEANUP_INTERVAL: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.cleanupInterval | default "1m" | quote }}{{ else }}"1m"{{ end }}
-  # Background fetch interval - how often to fetch metrics in background (default: "30s", 0 = disable)
-  PROMETHEUS_METRICS_CACHE_FETCH_INTERVAL: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.fetchInterval | default "30s" | quote }}{{ else }}"30s"{{ end }}
-  # Freshness thresholds - when metrics are considered fresh/stale/unavailable
-  PROMETHEUS_METRICS_CACHE_FRESH_THRESHOLD: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.freshThreshold | default "1m" | quote }}{{ else }}"1m"{{ end }}
-  PROMETHEUS_METRICS_CACHE_STALE_THRESHOLD: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.staleThreshold | default "2m" | quote }}{{ else }}"2m"{{ end }}
-  PROMETHEUS_METRICS_CACHE_UNAVAILABLE_THRESHOLD: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.unavailableThreshold | default "5m" | quote }}{{ else }}"5m"{{ end }}
-
-  # EPP metrics cache configuration (for future EPP collector)
-  # Uncomment and configure when EPP collector is implemented - future implementation
-  # EPP_METRICS_CACHE_ENABLED: "true"
-  # EPP_METRICS_CACHE_TTL: "15s"
-  # EPP_METRICS_CACHE_MAX_SIZE: "500"
-  # EPP_METRICS_CACHE_CLEANUP_INTERVAL: "30s"
-  # ============================================================================
-  # END OF CONFIGURATION
-  # ============================================================================
-  # For more information about immutable vs mutable parameters, see:
-  # https://github.com/llm-d/llm-d-workload-variant-autoscaler/blob/main/docs/user-guide/configuration.md#unified-configuration-system
-  #
-  # IMMUTABLE CONFIGMAP:
-  # If wva.configMap.immutable is set to true, this ConfigMap becomes immutable
-  # after creation. This provides security benefits:
-  #   - Prevents accidental configuration changes
-  #   - Protects against malicious modifications
-  #   - Ensures configuration integrity
-  # However, this disables runtime config updates. To change configuration:
-  #   1. Delete the ConfigMap (kubectl delete configmap <name>)
-  #   2. Update Helm values and upgrade the release
-  #   3. Restart the controller pod
+    # Prometheus Metrics Cache
+    # Time-to-live for cached Prometheus metric responses.
+    PROMETHEUS_METRICS_CACHE_TTL: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.ttl | default "30s" | quote }}{{ else }}"30s"{{ end }}
+    # Interval for cleaning up expired entries from the metrics cache.
+    PROMETHEUS_METRICS_CACHE_CLEANUP_INTERVAL: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.cleanupInterval | default "1m" | quote }}{{ else }}"1m"{{ end }}
+    # Interval for background refresh of metrics cache entries.
+    PROMETHEUS_METRICS_CACHE_FETCH_INTERVAL: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.fetchInterval | default "30s" | quote }}{{ else }}"30s"{{ end }}
+    # Maximum age for metrics to be considered fresh.
+    PROMETHEUS_METRICS_CACHE_FRESH_THRESHOLD: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.freshThreshold | default "1m" | quote }}{{ else }}"1m"{{ end }}
+    # Maximum age for metrics to be considered stale (before unavailable).
+    PROMETHEUS_METRICS_CACHE_STALE_THRESHOLD: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.staleThreshold | default "2m" | quote }}{{ else }}"2m"{{ end }}
+    # Maximum age for metrics before they are considered unavailable.
+    PROMETHEUS_METRICS_CACHE_UNAVAILABLE_THRESHOLD: {{ if and .Values.wva.prometheus .Values.wva.prometheus.metricsCache }}{{ .Values.wva.prometheus.metricsCache.unavailableThreshold | default "5m" | quote }}{{ else }}"5m"{{ end }}
 {{- end }}
