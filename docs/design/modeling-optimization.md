@@ -8,7 +8,7 @@ WVA uses modeling, benchmarking, and optimization to find the best possible solu
 
 ## Definitions and assumptions
 
-- An **accelerator** is a unit of allocation of (GPU) devices, of a given type and multiplicity, e.g. 2xH100 is an accelarator consisting of two H100 GPUs, in order to satisfy model memory constraints and/or performance.
+- An **accelerator** is a unit of allocation of (GPU) devices, of a given type and multiplicity, e.g. 2xH100 is an accelerator consisting of two H100 GPUs, in order to satisfy model memory constraints and/or performance.
 
 - An **accelerator arrangement** consists of one or more accelerators in parallel (tensor or pipeline parallelism) assigned to a model server.
 
@@ -41,7 +41,7 @@ The former is used to estimate performance given the current and/or predicted/an
 
 Typically, analytical performance models have their own internal parameters. For example, the base and slope of the linear relationship between ITL and batch size ([explained below in more detail](#deriving-performance-parameters-through-linear-fit)), are parameters of the model. In this case, the determination of such parameters may be achieved through offline benchmarking and/or online through observations and tuning (dynamic adjustment of parameter values to match observations).
 
-The other relevant performance parameter is an upper bound on the batch size, given a particular average number of tokens per request, beyond which preformance degrades severely.
+The other relevant performance parameter is an upper bound on the batch size, given a particular average number of tokens per request, beyond which performance degrades severely.
 
 ## Benchmarking methodology
 
