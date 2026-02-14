@@ -161,6 +161,16 @@ retention_period: %s`, modelName, retentionPeriodShort),
 		hpa := utils.CreateHPAOnDesiredReplicaMetrics(hpaName, namespace, deployName, name, 10)
 		_, err = k8sClient.AutoscalingV2().HorizontalPodAutoscalers(namespace).Create(ctx, hpa, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Should be able to create HPA: %s", hpaName))
+
+		By("waiting for metrics pipeline to be ready")
+		Eventually(func(g Gomega) {
+			va := &v1alpha1.VariantAutoscaling{}
+			err := crClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, va)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(va.Status.DesiredOptimizedAlloc.Accelerator).NotTo(BeEmpty(),
+				"VariantAutoscaling DesiredOptimizedAlloc should be populated")
+		}, 5*time.Minute, 10*time.Second).Should(Succeed())
+		_, _ = fmt.Fprintf(GinkgoWriter, "Metrics pipeline ready - DesiredOptimizedAlloc populated\n")
 	})
 
 	// ConfigMap and VA existence checks - same as saturation test + scale-to-zero ConfigMap check
