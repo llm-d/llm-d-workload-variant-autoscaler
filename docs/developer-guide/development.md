@@ -371,7 +371,7 @@ See [Agentic Workflows Guide](agentic-workflows.md) for detailed information on 
 
 ## Release Process
 
-See [Releasing Guide](releasing.md) (coming soon) for the release process.
+Release process documentation is coming soon. For now, see the GitHub Actions workflows in `.github/workflows/` for the automated release pipeline.
 
 ## Getting Help
 

@@ -12,9 +12,9 @@ spec:
     llm-d.ai/model: {{ .Values.llmd.modelName }}
   ports:
     - name: vllm
-      port: 8200
+      port: {{ .Values.vllmService.port }}
       protocol: TCP
-      targetPort: 8200
+      targetPort: {{ .Values.vllmService.targetPort }}
       # NodePort is auto-assigned by Kubernetes to avoid conflicts
   type: NodePort
 {{- end }}
