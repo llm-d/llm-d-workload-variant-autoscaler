@@ -612,6 +612,11 @@ WVA supports configuration via environment variables for operational settings:
 - `PROMETHEUS_SERVER_NAME`: Expected server name in TLS certificate
 - `PROMETHEUS_BEARER_TOKEN`: Bearer token for authentication
 
+**Scale-to-Zero Configuration:**
+- `WVA_SCALE_TO_ZERO`: Enable scale-to-zero for all models (default: `"false"`)
+  - Set to `"true"` to allow deployments to scale to zero replicas when idle
+  - See [Scale-to-Zero Guide](scale-to-zero.md) for detailed configuration
+
 **Other Configuration:**
 - `CONFIG_MAP_NAME`: ConfigMap name (default: auto-generated from Helm release)
 - `POD_NAMESPACE`: Controller namespace (auto-injected by Kubernetes)
@@ -722,5 +727,6 @@ For complete documentation, see [Multi-Controller Isolation Guide](multi-control
 ## Next Steps
 
 - [Run the Quick Start Demo](../tutorials/demo.md)
+- [Configure Scale-to-Zero](scale-to-zero.md)
 - [Integrate with HPA](../integrations/hpa-integration.md)
 - [Set up Prometheus monitoring](../integrations/prometheus.md)

@@ -10,6 +10,7 @@ Getting started and using WVA:
 
 - **[Installation Guide](user-guide/installation.md)** - Installing WVA on your cluster
 - **[Configuration](user-guide/configuration.md)** - Configuring WVA for your workloads
+- **[Scale-to-Zero](user-guide/scale-to-zero.md)** - Automatically scale deployments to zero replicas when idle
 - **[CRD Reference](user-guide/crd-reference.md)** - Complete API reference for VariantAutoscaling
 - **[Multi-Controller Isolation](user-guide/multi-controller-isolation.md)** - Running multiple WVA controller instances
 

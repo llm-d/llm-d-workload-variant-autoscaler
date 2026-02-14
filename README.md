@@ -61,6 +61,7 @@ See the [Installation Guide](docs/user-guide/installation.md) for detailed instr
 ### User Guide
 - [Installation Guide](docs/user-guide/installation.md)
 - [Configuration](docs/user-guide/configuration.md)
+- [Scale-to-Zero](docs/user-guide/scale-to-zero.md)
 - [CRD Reference](docs/user-guide/crd-reference.md)
 - [Multi-Controller Isolation](docs/user-guide/multi-controller-isolation.md)
 
