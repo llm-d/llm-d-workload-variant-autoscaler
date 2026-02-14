@@ -359,10 +359,17 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 									Command: []string{"/bin/sh", "-c"},
 									Args: []string{fmt.Sprintf(`
 echo "Checking gateway readiness at %s:80..."
-RESPONSE=$(curl -sf --max-time 10 http://%s:80/v1/models 2>&1)
+# Capture HTTP status code separately to aid debugging
+HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%%{http_code}" --max-time 10 http://%s:80/v1/models 2>/dev/null)
 CURL_EXIT=$?
+RESPONSE=$(cat /tmp/response.txt 2>/dev/null)
 if [ $CURL_EXIT -ne 0 ]; then
-  echo "Gateway not responding (curl exit code: $CURL_EXIT)"
+  echo "Gateway not responding (curl exit code: $CURL_EXIT, HTTP status: $HTTP_CODE)"
+  echo "Response: $RESPONSE"
+  exit 1
+fi
+if [ "${HTTP_CODE:-0}" -ge 400 ] 2>/dev/null; then
+  echo "Gateway returned HTTP $HTTP_CODE"
   echo "Response: $RESPONSE"
   exit 1
 fi
@@ -372,7 +379,7 @@ if echo "$RESPONSE" | grep -q '"id":'; then
   echo "Response: $RESPONSE"
   exit 0
 fi
-echo "Gateway responded but no model data found in response"
+echo "Gateway responded (HTTP $HTTP_CODE) but no model data found in response"
 echo "Response: $RESPONSE"
 exit 1`,
 										model.gatewayService, model.gatewayService)},

@@ -118,6 +118,8 @@ hpa:
 
 vllmService:
   enabled: true
+  port: 8200
+  targetPort: 8200
   nodePort: 30000
   interval: 15s
   scheme: http  # vLLM emulator runs on HTTP

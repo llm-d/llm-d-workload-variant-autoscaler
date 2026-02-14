@@ -35,6 +35,7 @@ WVA_IMAGE_TAG=${WVA_IMAGE_TAG:-"latest"}
 WVA_IMAGE_PULL_POLICY=${WVA_IMAGE_PULL_POLICY:-"Always"}
 WVA_RELEASE_NAME=${WVA_RELEASE_NAME:-"workload-variant-autoscaler"}
 VLLM_SVC_ENABLED=${VLLM_SVC_ENABLED:-true}
+VLLM_SVC_PORT=${VLLM_SVC_PORT:-8200}
 VLLM_SVC_NODEPORT=${VLLM_SVC_NODEPORT:-30000}
 SKIP_TLS_VERIFY=${SKIP_TLS_VERIFY:-"false"}
 WVA_LOG_LEVEL=${WVA_LOG_LEVEL:-"info"}
@@ -68,7 +69,7 @@ INSTALL_GATEWAY_CTRLPLANE_ORIGINAL="${INSTALL_GATEWAY_CTRLPLANE:-}"
 INSTALL_GATEWAY_CTRLPLANE="${INSTALL_GATEWAY_CTRLPLANE:-false}"
 
 # Model and SLO Configuration
-DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-"Qwen/Qwen3-32B"}
+DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-"Qwen/Qwen3-0.6B"}
 MODEL_ID=${MODEL_ID:-"unsloth/Meta-Llama-3.1-8B"}
 ACCELERATOR_TYPE=${ACCELERATOR_TYPE:-"H100"}
 SLO_TPOT=${SLO_TPOT:-10}  # Target time-per-output-token SLO (in ms)
@@ -96,6 +97,8 @@ HPA_STABILIZATION_SECONDS=${HPA_STABILIZATION_SECONDS:-240}
 HPA_MIN_REPLICAS=${HPA_MIN_REPLICAS:-1}
 SKIP_CHECKS=${SKIP_CHECKS:-false}
 E2E_TESTS_ENABLED=${E2E_TESTS_ENABLED:-false}
+# WVA metrics endpoint security (set false to disable bearer token auth on /metrics)
+WVA_METRICS_SECURE=${WVA_METRICS_SECURE:-true}
 # vLLM max-num-seqs (max concurrent sequences per replica, lower = easier to saturate for testing)
 VLLM_MAX_NUM_SEQS=${VLLM_MAX_NUM_SEQS:-""}
 # Decode replicas override (useful for e2e testing with limited GPUs)
@@ -450,12 +453,15 @@ deploy_wva_controller() {
         --set wva.prometheus.baseURL=$PROMETHEUS_URL \
         --set wva.prometheus.monitoringNamespace=$MONITORING_NAMESPACE \
         --set vllmService.enabled=$VLLM_SVC_ENABLED \
+        --set vllmService.port=$VLLM_SVC_PORT \
+        --set vllmService.targetPort=$VLLM_SVC_PORT \
         --set vllmService.nodePort=$VLLM_SVC_NODEPORT \
         --set wva.logging.level=$WVA_LOG_LEVEL \
         --set wva.prometheus.tls.insecureSkipVerify=$SKIP_TLS_VERIFY \
         --set wva.namespaceScoped=$NAMESPACE_SCOPED \
+        --set wva.metrics.secure=$WVA_METRICS_SECURE \
         ${CONTROLLER_INSTANCE:+--set wva.controllerInstance=$CONTROLLER_INSTANCE}
-    
+
     # Wait for WVA to be ready
     log_info "Waiting for WVA controller to be ready..."
     kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=workload-variant-autoscaler -n $WVA_NS --timeout=60s || \
@@ -710,7 +716,20 @@ deploy_llm_d_infrastructure() {
     # Install dependencies
     log_info "Installing llm-d dependencies"
     bash $CLIENT_PREREQ_DIR/install-deps.sh
-    bash $GATEWAY_PREREQ_DIR/install-gateway-provider-dependencies.sh
+
+    # On OpenShift, skip base Gateway API CRDs (managed by Ingress Operator via
+    # ValidatingAdmissionPolicy "openshift-ingress-operator-gatewayapi-crd-admission").
+    # Only install Gateway API Inference Extension (GAIE) CRDs directly.
+    if [[ "$ENVIRONMENT" == "openshift" ]]; then
+        log_info "Skipping Gateway API base CRDs on OpenShift (managed by Ingress Operator)"
+        GAIE_CRD_REV=${GATEWAY_API_INFERENCE_EXTENSION_CRD_REVISION:-"v1.3.0"}
+        log_info "Installing Gateway API Inference Extension CRDs (${GAIE_CRD_REV})"
+        kubectl apply -k "https://github.com/kubernetes-sigs/gateway-api-inference-extension/config/crd/?ref=${GAIE_CRD_REV}" \
+            && log_success "GAIE CRDs installed" \
+            || log_warning "Failed to install GAIE CRDs (may already exist or network issue)"
+    else
+        bash $GATEWAY_PREREQ_DIR/install-gateway-provider-dependencies.sh
+    fi
 
     # Install Gateway provider (if kgateway, use v2.0.3)
     if [ "$GATEWAY_PROVIDER" == "kgateway" ]; then
@@ -736,14 +755,22 @@ deploy_llm_d_infrastructure() {
     cd $EXAMPLE_DIR
     log_info "Configuring llm-d infrastructure"
 
-    # Update model ID if different from default
-    if [ "$MODEL_ID" != "$DEFAULT_MODEL_ID" ] ; then
-        log_info "Updating deployment to use model: $MODEL_ID"
-        yq eval "(.. | select(. == \"$DEFAULT_MODEL_ID\")) = \"$MODEL_ID\" | (.. | select(. == \"hf://$DEFAULT_MODEL_ID\")) = \"hf://$MODEL_ID\"" -i "$LLM_D_MODELSERVICE_VALUES"
+    # Detect the actual default model from the values file (not the hardcoded DEFAULT_MODEL_ID)
+    ACTUAL_DEFAULT_MODEL=$(yq eval '.modelArtifacts.name' "$LLM_D_MODELSERVICE_VALUES" 2>/dev/null || echo "$DEFAULT_MODEL_ID")
+    if [ -z "$ACTUAL_DEFAULT_MODEL" ] || [ "$ACTUAL_DEFAULT_MODEL" == "null" ]; then
+        ACTUAL_DEFAULT_MODEL="$DEFAULT_MODEL_ID"
+    fi
+
+    # Update model ID if different from the guide's actual default
+    if [ "$MODEL_ID" != "$ACTUAL_DEFAULT_MODEL" ] ; then
+        log_info "Updating deployment to use model: $MODEL_ID (replacing guide default: $ACTUAL_DEFAULT_MODEL)"
+        yq eval "(.. | select(. == \"$ACTUAL_DEFAULT_MODEL\")) = \"$MODEL_ID\" | (.. | select(. == \"hf://$ACTUAL_DEFAULT_MODEL\")) = \"hf://$MODEL_ID\"" -i "$LLM_D_MODELSERVICE_VALUES"
 
         # Increase model-storage volume size
         log_info "Increasing model-storage volume size for model: $MODEL_ID"
         yq eval '.modelArtifacts.size = "100Gi"' -i "$LLM_D_MODELSERVICE_VALUES"
+    else
+        log_info "Model ID matches guide default ($ACTUAL_DEFAULT_MODEL), no replacement needed"
     fi
 
     # Configure llm-d-inference-simulator if needed
@@ -770,6 +797,35 @@ deploy_llm_d_infrastructure() {
       yq eval ".decode.replicas = $DECODE_REPLICAS" -i "$LLM_D_MODELSERVICE_VALUES"
     fi
 
+    # Check if the guide's llm-d.ai/model label differs from what WVA's vllm-service expects.
+    # If so, we'll patch pod labels post-deploy (not pre-deploy) to avoid violating the
+    # llm-d-modelservice chart schema which disallows extra properties under modelArtifacts.
+    CURRENT_MODEL_LABEL=$(yq eval '.modelArtifacts.labels."llm-d.ai/model"' "$LLM_D_MODELSERVICE_VALUES" 2>/dev/null || echo "")
+    NEEDS_LABEL_ALIGNMENT=false
+    if [ -n "$CURRENT_MODEL_LABEL" ] && [ "$CURRENT_MODEL_LABEL" != "null" ] && [ "$CURRENT_MODEL_LABEL" != "$LLM_D_MODELSERVICE_NAME" ]; then
+      log_info "Will align llm-d.ai/model label post-deploy: '$CURRENT_MODEL_LABEL' -> '$LLM_D_MODELSERVICE_NAME'"
+      NEEDS_LABEL_ALIGNMENT=true
+    fi
+
+    # Auto-detect vLLM port from guide configuration and update WVA vllm-service.
+    # When routing proxy is disabled, vLLM serves directly on containerPort (typically 8000).
+    # When proxy is enabled, vLLM serves on proxy.targetPort (typically 8200).
+    PROXY_ENABLED=$(yq eval '.routing.proxy.enabled // true' "$LLM_D_MODELSERVICE_VALUES" 2>/dev/null || echo "true")
+    if [ "$PROXY_ENABLED" == "false" ]; then
+      DETECTED_PORT=$(yq eval '.decode.containers[0].ports[0].containerPort // 8000' "$LLM_D_MODELSERVICE_VALUES" 2>/dev/null || echo "8000")
+      if [ "$VLLM_SVC_PORT" != "$DETECTED_PORT" ]; then
+        log_info "Routing proxy disabled - updating vLLM service port: $VLLM_SVC_PORT -> $DETECTED_PORT"
+        VLLM_SVC_PORT=$DETECTED_PORT
+        # Update the WVA vllm-service port (WVA was deployed before llm-d infra)
+        if [ "$DEPLOY_WVA" == "true" ] && [ "$VLLM_SVC_ENABLED" == "true" ]; then
+          helm upgrade "$WVA_RELEASE_NAME" ${WVA_PROJECT}/charts/workload-variant-autoscaler \
+            -n $WVA_NS --reuse-values \
+            --set vllmService.port=$VLLM_SVC_PORT \
+            --set vllmService.targetPort=$VLLM_SVC_PORT
+        fi
+      fi
+    fi
+
     # Deploy llm-d core components
     log_info "Deploying llm-d core components"
     # When DEPLOY_WVA is true, skip WVA in helmfile — install.sh deploys it
@@ -782,7 +838,69 @@ deploy_llm_d_infrastructure() {
       log_info "Skipping WVA in helmfile (will be deployed separately from local chart)"
     fi
     helmfile apply -e $GATEWAY_PROVIDER -n ${LLMD_NS} $helmfile_selector
-    kubectl apply -f httproute.yaml -n ${LLMD_NS}
+
+    # Post-deploy: align the WVA vllm-service selector and ServiceMonitor to match
+    # the actual pod labels. The llm-d-modelservice chart sets pod labels from
+    # modelArtifacts.labels (e.g. "Qwen3-32B"), but the WVA chart's Service selector
+    # uses llmd.modelName (e.g. "ms-inference-scheduling-llm-d-modelservice").
+    # We patch the Service/ServiceMonitor selectors (which ARE mutable) rather than
+    # the deployment labels (which have immutable selectors).
+    if [ "$NEEDS_LABEL_ALIGNMENT" == "true" ]; then
+      # Compute the chart fullname (mirrors _helpers.tpl logic)
+      local chart_name="workload-variant-autoscaler"
+      local wva_fullname
+      if echo "$WVA_RELEASE_NAME" | grep -q "$chart_name"; then
+        wva_fullname="$WVA_RELEASE_NAME"
+      else
+        wva_fullname="${WVA_RELEASE_NAME}-${chart_name}"
+      fi
+      wva_fullname=$(echo "$wva_fullname" | cut -c1-63 | sed 's/-$//')
+      local svc_name="${wva_fullname}-vllm"
+      local svcmon_name="${wva_fullname}-vllm-mon"
+      log_info "Aligning WVA Service/ServiceMonitor selectors: llm-d.ai/model=$CURRENT_MODEL_LABEL"
+      # Patch Service selector
+      kubectl patch service "$svc_name" -n "$LLMD_NS" --type=merge -p "{
+        \"spec\": {\"selector\": {\"llm-d.ai/model\": \"$CURRENT_MODEL_LABEL\"}}
+      }" && log_success "Patched Service $svc_name selector" \
+         || log_warning "Failed to patch Service $svc_name selector"
+      # Patch ServiceMonitor matchLabels
+      kubectl patch servicemonitor "$svcmon_name" -n "$LLMD_NS" --type=merge -p "{
+        \"spec\": {\"selector\": {\"matchLabels\": {\"llm-d.ai/model\": \"$CURRENT_MODEL_LABEL\"}}}
+      }" && log_success "Patched ServiceMonitor $svcmon_name selector" \
+         || log_warning "Failed to patch ServiceMonitor $svcmon_name selector"
+      # Also patch the Service labels so the ServiceMonitor can find it
+      kubectl label service "$svc_name" -n "$LLMD_NS" "llm-d.ai/model=$CURRENT_MODEL_LABEL" --overwrite \
+        && log_success "Patched Service $svc_name label" \
+        || log_warning "Failed to patch Service $svc_name label"
+    fi
+
+    # Apply HTTPRoute with correct resource name references.
+    # The static httproute.yaml uses resource names matching the helmfile's default
+    # RELEASE_NAME_POSTFIX (e.g. "workload-autoscaler"). When RELEASE_NAME_POSTFIX
+    # is overridden (e.g. in CI), gateway and InferencePool names change, so we
+    # must template the HTTPRoute references to match the actual deployed resources.
+    # RELEASE_NAME_POSTFIX is set by the reusable nightly workflow
+    # (llm-d-infra reusable-nightly-e2e-openshift.yaml) via the guide_name input.
+    if [ -f httproute.yaml ]; then
+        local rn="${RELEASE_NAME_POSTFIX:-}"
+        if [ -n "$rn" ]; then
+            local gw_name="infra-${rn}-inference-gateway"
+            local pool_name="gaie-${rn}"
+            log_info "Applying HTTPRoute (gateway=$gw_name, pool=$pool_name)"
+            if ! yq eval "
+                .spec.parentRefs[0].name = \"${gw_name}\" |
+                .spec.rules[0].backendRefs[0].name = \"${pool_name}\"
+            " httproute.yaml | kubectl apply -f - -n ${LLMD_NS}; then
+                log_error "Failed to apply templated HTTPRoute for gateway=${gw_name}, pool=${pool_name}"
+                exit 1
+            fi
+        else
+            if ! kubectl apply -f httproute.yaml -n ${LLMD_NS}; then
+                log_error "Failed to apply HTTPRoute from httproute.yaml"
+                exit 1
+            fi
+        fi
+    fi
 
     # Patch llm-d-inference-scheduler deployment if scale-to-zero is enabled
     if [ "$ENABLE_SCALE_TO_ZERO" == "true" ]; then
@@ -877,6 +995,39 @@ deploy_prometheus_adapter() {
         }
     
     log_success "Prometheus Adapter deployment initiated (may still be starting)"
+
+    # On clusters with KEDA, the v1beta1.external.metrics.k8s.io APIService may
+    # point to KEDA's metrics server instead of Prometheus Adapter. KEDA's server
+    # only serves metrics for ScaledObjects, not arbitrary external metrics like
+    # wva_desired_replicas. Detect and fix this conflict.
+    # Only patch if the Prometheus Adapter service actually exists (i.e. helm install succeeded).
+    if ! kubectl get service prometheus-adapter -n "$MONITORING_NAMESPACE" &>/dev/null; then
+        log_warning "Prometheus Adapter service not found in $MONITORING_NAMESPACE — skipping APIService patch"
+        log_warning "HPA may not work until Prometheus Adapter is deployed"
+    elif kubectl get apiservice v1beta1.external.metrics.k8s.io &>/dev/null; then
+        local current_svc current_ns
+        current_svc=$(kubectl get apiservice v1beta1.external.metrics.k8s.io -o jsonpath='{.spec.service.name}' 2>/dev/null || echo "")
+        current_ns=$(kubectl get apiservice v1beta1.external.metrics.k8s.io -o jsonpath='{.spec.service.namespace}' 2>/dev/null || echo "")
+
+        if [ "$current_svc" = "prometheus-adapter" ] && [ "$current_ns" = "$MONITORING_NAMESPACE" ]; then
+            log_info "external.metrics.k8s.io APIService already points to prometheus-adapter in $MONITORING_NAMESPACE"
+        else
+            log_warning "external.metrics.k8s.io APIService points to '$current_svc' in '$current_ns'"
+            log_info "Patching APIService to point to Prometheus Adapter in $MONITORING_NAMESPACE"
+            kubectl patch apiservice v1beta1.external.metrics.k8s.io --type=merge -p "{
+                \"spec\": {
+                    \"insecureSkipTLSVerify\": true,
+                    \"service\": {
+                        \"name\": \"prometheus-adapter\",
+                        \"namespace\": \"$MONITORING_NAMESPACE\"
+                    }
+                }
+            }" && log_success "APIService patched to use Prometheus Adapter" \
+               || log_warning "Failed to patch external.metrics.k8s.io APIService — HPA may not work"
+        fi
+    else
+        log_warning "external.metrics.k8s.io APIService not found — skipping patch"
+    fi
 }
 
 verify_deployment() {

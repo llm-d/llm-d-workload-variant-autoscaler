@@ -13,6 +13,7 @@ spec:
     - interval: 10s
       path: /metrics
       port: https
+      {{- if .Values.wva.metrics.secure }}
       scheme: https
       bearerTokenSecret:
         name: {{ include "workload-variant-autoscaler.fullname" . }}-controller-manager-token
@@ -21,6 +22,9 @@ spec:
         # WVA metrics endpoint uses self-signed certificates, so Prometheus must skip verification
         # This is separate from WVA->Prometheus TLS verification
         insecureSkipVerify: true
+      {{- else }}
+      scheme: http
+      {{- end }}
   namespaceSelector:
     matchNames:
       - {{ .Release.Namespace }}
