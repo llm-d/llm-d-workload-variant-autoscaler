@@ -292,7 +292,7 @@ func TestEvalServTime(t *testing.T) {
 	// Create a test model - use state-dependent model for global variable
 	servRates := []float32{1.0, 2.0, 3.0, 4.0, 5.0}
 	model := NewMM1ModelStateDependent(5, servRates)
-	Model = model // Set global variable for eval functions
+	evalFunc := EvalServTime(model)
 
 	tests := []struct {
 		name    string
@@ -318,7 +318,7 @@ func TestEvalServTime(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := EvalServTime(tt.lambda)
+			result, err := evalFunc(tt.lambda)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("EvalServTime() error = %v, wantErr %v", err, tt.wantErr)
@@ -338,7 +338,7 @@ func TestEvalWaitingTime(t *testing.T) {
 	// Create a test model - use state-dependent model for global variable
 	servRates := []float32{1.0, 2.0, 3.0, 4.0, 5.0}
 	model := NewMM1ModelStateDependent(5, servRates)
-	Model = model // Set global variable for eval functions
+	evalFunc := EvalWaitingTime(model)
 
 	tests := []struct {
 		name    string
@@ -364,7 +364,7 @@ func TestEvalWaitingTime(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := EvalWaitingTime(tt.lambda)
+			result, err := evalFunc(tt.lambda)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("EvalWaitingTime() error = %v, wantErr %v", err, tt.wantErr)
@@ -386,23 +386,21 @@ func TestEvalTTFT(t *testing.T) {
 		MaxBatchSize: 4,
 		MaxQueueSize: 8,
 		ServiceParms: &ServiceParms{
-			Prefill: &PrefillParms{
-				Gamma: 10.0,
-				Delta: 0.001,
-			},
-			Decode: &DecodeParms{
-				Alpha: 1.0,
-				Beta:  0.01,
-			},
+			Alpha: 1.0,
+			Beta:  0.01,
+			Gamma: 0.001,
 		},
 	}
 	requestSize := &RequestSize{AvgInputTokens: 100, AvgOutputTokens: 10}
 
 	qa := BuildModel(config, requestSize)
-	Model = qa.Model
-	evalRequestSize = requestSize
-	evalServiceParms = config.ServiceParms
-	evalMaxBatchSize = config.MaxBatchSize
+	evalFuncData := &EvalFuncData{
+		model:        qa.Model,
+		requestSize:  qa.RequestSize,
+		serviceParms: qa.ServiceParms,
+		maxBatchSize: qa.MaxBatchSize,
+	}
+	evalFunc := EvalTTFT(evalFuncData)
 
 	tests := []struct {
 		name    string
@@ -428,7 +426,7 @@ func TestEvalTTFT(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := EvalTTFT(tt.lambda)
+			result, err := evalFunc(tt.lambda)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("EvalTTFT() error = %v, wantErr %v", err, tt.wantErr)
@@ -441,7 +439,7 @@ func TestEvalTTFT(t *testing.T) {
 				}
 
 				// TTFT should include waiting time and prefill time
-				if result < 10.0 { // At least the base prefill time (gamma)
+				if result < 1.0 { // At least the base prefill time (alpha)
 					t.Errorf("EvalTTFT() = %v, should be at least base prefill time", result)
 				}
 			}
@@ -455,23 +453,21 @@ func TestEvalITL(t *testing.T) {
 		MaxBatchSize: 4,
 		MaxQueueSize: 8,
 		ServiceParms: &ServiceParms{
-			Prefill: &PrefillParms{
-				Gamma: 10.0,
-				Delta: 0.001,
-			},
-			Decode: &DecodeParms{
-				Alpha: 1.0,
-				Beta:  0.01,
-			},
+			Alpha: 1.0,
+			Beta:  0.01,
+			Gamma: 0.001,
 		},
 	}
 	requestSize := &RequestSize{AvgInputTokens: 100, AvgOutputTokens: 10}
 
 	qa := BuildModel(config, requestSize)
-	Model = qa.Model
-	evalRequestSize = requestSize
-	evalServiceParms = config.ServiceParms
-	evalMaxBatchSize = config.MaxBatchSize
+	evalFuncData := &EvalFuncData{
+		model:        qa.Model,
+		requestSize:  qa.RequestSize,
+		serviceParms: qa.ServiceParms,
+		maxBatchSize: qa.MaxBatchSize,
+	}
+	evalFunc := EvalITL(evalFuncData)
 
 	tests := []struct {
 		name    string
@@ -497,7 +493,7 @@ func TestEvalITL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := EvalITL(tt.lambda)
+			result, err := evalFunc(tt.lambda)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("EvalITL() error = %v, wantErr %v", err, tt.wantErr)
@@ -524,23 +520,24 @@ func TestBinarySearchWithAnalyzerFunctions(t *testing.T) {
 		MaxBatchSize: 4,
 		MaxQueueSize: 8,
 		ServiceParms: &ServiceParms{
-			Prefill: &PrefillParms{
-				Gamma: 10.0,
-				Delta: 0.001,
-			},
-			Decode: &DecodeParms{
-				Alpha: 1.0,
-				Beta:  0.01,
-			},
+			Alpha: 1.0,
+			Beta:  0.01,
+			Gamma: 10.0,
 		},
 	}
 	requestSize := &RequestSize{AvgInputTokens: 100, AvgOutputTokens: 10}
 
 	qa := BuildModel(config, requestSize)
-	Model = qa.Model
-	evalRequestSize = requestSize
-	evalServiceParms = config.ServiceParms
-	evalMaxBatchSize = config.MaxBatchSize
+	evalFuncData := &EvalFuncData{
+		model:        qa.Model,
+		requestSize:  qa.RequestSize,
+		serviceParms: qa.ServiceParms,
+		maxBatchSize: qa.MaxBatchSize,
+	}
+	evalTTFTFunc := EvalTTFT(evalFuncData)
+	evalITLFunc := EvalITL(evalFuncData)
+	evalServTimeFunc := EvalServTime(qa.Model)
+	evalWaitTimeFunc := EvalWaitingTime(qa.Model)
 
 	lambdaMin := qa.RateRange.Min / 1000 // Convert to requests per msec
 	lambdaMax := qa.RateRange.Max / 1000
@@ -554,25 +551,25 @@ func TestBinarySearchWithAnalyzerFunctions(t *testing.T) {
 		{
 			name:        "find lambda for target TTFT",
 			yTarget:     25.0, // 25 msec target TTFT
-			evalFunc:    EvalTTFT,
+			evalFunc:    evalTTFTFunc,
 			description: "time to first token",
 		},
 		{
 			name:        "find lambda for target ITL",
 			yTarget:     2.0, // 2 msec target inter-token latency
-			evalFunc:    EvalITL,
+			evalFunc:    evalITLFunc,
 			description: "inter-token latency",
 		},
 		{
 			name:        "find lambda for target service time",
 			yTarget:     50.0, // 50 msec target service time
-			evalFunc:    EvalServTime,
+			evalFunc:    evalServTimeFunc,
 			description: "service time",
 		},
 		{
 			name:        "find lambda for target waiting time",
 			yTarget:     10.0, // 10 msec target waiting time
-			evalFunc:    EvalWaitingTime,
+			evalFunc:    evalWaitTimeFunc,
 			description: "waiting time",
 		},
 	}

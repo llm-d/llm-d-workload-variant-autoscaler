@@ -36,13 +36,10 @@ func setupCompleteTestSystem() {
 		AccCount:     1,
 		MaxBatchSize: 16,
 		AtTokens:     200,
-		DecodeParms: config.DecodeParms{
+		ServiceParms: config.ServiceParms{
 			Alpha: 5.0,
-			Beta:  2.0,
-		},
-		PrefillParms: config.PrefillParms{
-			Gamma: 10.0,
-			Delta: 1.5,
+			Beta:  0.2,
+			Gamma: 0.015,
 		},
 	}
 	model.AddPerfDataFromSpec(perfData)
@@ -120,12 +117,12 @@ func TestAllocation_Getters(t *testing.T) {
 		{
 			name:     "MaxArrvRatePerReplica",
 			getter:   func() any { return alloc.MaxArrvRatePerReplica() },
-			expected: float32(0.3298969),
+			expected: float32(1.1940299),
 		},
 		{
 			name:     "MaxRPM",
 			getter:   func() any { return alloc.MaxRPM() },
-			expected: float32(19793.814),
+			expected: float32(71641.8),
 		},
 	}
 
@@ -210,12 +207,12 @@ func TestAllocation_Saturated(t *testing.T) {
 		},
 		{
 			name:      "at saturation",
-			totalRate: 19794.0, // Clearly above MaxRPM
+			totalRate: 78132, // Clearly above MaxRPM
 			want:      true,
 		},
 		{
 			name:      "above saturation",
-			totalRate: 25000.0,
+			totalRate: 80000.0,
 			want:      true,
 		},
 		{
@@ -998,13 +995,10 @@ func TestZeroLoadAllocation(t *testing.T) {
 			},
 			perf: &config.ModelAcceleratorPerfData{
 				MaxBatchSize: 16,
-				DecodeParms: config.DecodeParms{
+				ServiceParms: config.ServiceParms{
 					Alpha: 5.0,
 					Beta:  2.0,
-				},
-				PrefillParms: config.PrefillParms{
-					Gamma: 10.0,
-					Delta: 1.5,
+					Gamma: 1.5,
 				},
 			},
 			wantAccel:     "",
@@ -1032,13 +1026,10 @@ func TestZeroLoadAllocation(t *testing.T) {
 			},
 			perf: &config.ModelAcceleratorPerfData{
 				MaxBatchSize: 16,
-				DecodeParms: config.DecodeParms{
+				ServiceParms: config.ServiceParms{
 					Alpha: 5.0,
 					Beta:  2.0,
-				},
-				PrefillParms: config.PrefillParms{
-					Gamma: 10.0,
-					Delta: 1.5,
+					Gamma: 1.5,
 				},
 			},
 			wantAccel:     "test-gpu",
@@ -1066,13 +1057,10 @@ func TestZeroLoadAllocation(t *testing.T) {
 			},
 			perf: &config.ModelAcceleratorPerfData{
 				MaxBatchSize: 16, // Should be overridden by server.maxBatchSize
-				DecodeParms: config.DecodeParms{
+				ServiceParms: config.ServiceParms{
 					Alpha: 3.0,
 					Beta:  1.0,
-				},
-				PrefillParms: config.PrefillParms{
-					Gamma: 8.0,
-					Delta: 2.0,
+					Gamma: 2.0,
 				},
 			},
 			wantAccel:     "test-gpu",
@@ -1115,18 +1103,18 @@ func TestZeroLoadAllocation(t *testing.T) {
 
 			// Verify performance metrics are calculated correctly for non-zero replicas
 			if tt.wantReplicas > 0 {
-				expectedDecodeTime := tt.perf.DecodeParms.Alpha + tt.perf.DecodeParms.Beta
+				expectedDecodeTime := tt.perf.ServiceParms.Alpha + tt.perf.ServiceParms.Beta
 				if alloc.itl != expectedDecodeTime {
 					t.Errorf("itl = %v, want %v", alloc.itl, expectedDecodeTime)
 				}
 
-				expectedPrefillTime := tt.perf.PrefillParms.Gamma + tt.perf.PrefillParms.Delta
+				expectedPrefillTime := tt.perf.ServiceParms.Alpha + tt.perf.ServiceParms.Beta
 				if alloc.ttft != expectedPrefillTime {
 					t.Errorf("ttft = %v, want %v", alloc.ttft, expectedPrefillTime)
 				}
 
 				// Verify maxArrvRatePerReplica calculation
-				maxDecodeTime := tt.perf.DecodeParms.Alpha + tt.perf.DecodeParms.Beta*float32(alloc.batchSize)
+				maxDecodeTime := tt.perf.ServiceParms.Alpha + tt.perf.ServiceParms.Beta*float32(alloc.batchSize)
 				maxServTime := expectedPrefillTime + maxDecodeTime
 				expectedMaxRate := float32(alloc.batchSize) / maxServTime
 				if alloc.maxArrvRatePerReplica != expectedMaxRate {
@@ -1161,13 +1149,10 @@ func TestZeroLoadAllocation_EdgeCases(t *testing.T) {
 			},
 			perf: &config.ModelAcceleratorPerfData{
 				MaxBatchSize: 1,
-				DecodeParms: config.DecodeParms{
+				ServiceParms: config.ServiceParms{
 					Alpha: 0.1,
 					Beta:  0.1,
-				},
-				PrefillParms: config.PrefillParms{
 					Gamma: 0.1,
-					Delta: 0.1,
 				},
 			},
 		},

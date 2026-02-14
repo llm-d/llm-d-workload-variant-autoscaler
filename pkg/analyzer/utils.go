@@ -52,7 +52,7 @@ func BinarySearch(xMin float32, xMax float32, yTarget float32,
 
 	// perform binary search
 	var xStar, yStar float32
-	for i := 0; i < maxIterations; i++ {
+	for range maxIterations {
 		xStar = 0.5 * (xMin + xMax)
 		if yStar, err = eval(xStar); err != nil {
 			return 0, 0, fmt.Errorf("invalid function evaluation: %v", err)
@@ -69,23 +69,95 @@ func BinarySearch(xMin float32, xMax float32, yTarget float32,
 	return xStar, 0, nil
 }
 
-// model as global variable, accesses by eval functions
-var Model *MM1ModelStateDependent
-
 // Function used in binary search (target service time)
-func EvalServTime(x float32) (float32, error) {
-	Model.Solve(x, 1)
-	if !Model.IsValid() {
-		return 0, fmt.Errorf("invalid model %v", Model)
+func EvalServTime(model *MM1ModelStateDependent) func(x float32) (float32, error) {
+	return func(x float32) (float32, error) {
+		model.Solve(x, 1)
+		if !model.IsValid() {
+			return 0, fmt.Errorf("invalid model %v", model)
+		}
+		return model.GetAvgServTime(), nil
 	}
-	return Model.GetAvgServTime(), nil
 }
 
 // Function used in binary search (target waiting time)
-func EvalWaitingTime(x float32) (float32, error) {
-	Model.Solve(x, 1)
-	if !Model.IsValid() {
-		return 0, fmt.Errorf("invalid model %v", Model)
+func EvalWaitingTime(model *MM1ModelStateDependent) func(x float32) (float32, error) {
+	return func(x float32) (float32, error) {
+		model.Solve(x, 1)
+		if !model.IsValid() {
+			return 0, fmt.Errorf("invalid model %v", model)
+		}
+		return model.GetAvgWaitTime(), nil
 	}
-	return Model.GetAvgWaitTime(), nil
+}
+
+// check validity of configuration parameters
+func (c *Configuration) check() error {
+	if c.MaxBatchSize <= 0 || c.MaxQueueSize < 0 || c.MaxNumTokens < 0 ||
+		c.ServiceParms == nil {
+		return fmt.Errorf("invalid configuration %s", c)
+	}
+	if c.MaxNumTokens == 0 {
+		c.MaxNumTokens = DefaultMaxNumTokens
+	}
+	return nil
+}
+
+// check validity of request size
+func (rq *RequestSize) check() error {
+	if rq.AvgInputTokens < 0 || rq.AvgOutputTokens < 1 {
+		return fmt.Errorf("invalid request size %s", rq)
+	}
+	return nil
+}
+
+// check validity of target values
+func (targetPerf *TargetPerf) check() error {
+	if targetPerf.TargetITL < 0 ||
+		targetPerf.TargetTTFT < 0 ||
+		targetPerf.TargetTPS < 0 {
+		return fmt.Errorf("invalid target data values %s", targetPerf)
+	}
+	return nil
+}
+
+/*
+ * toString() functions
+ */
+
+func (c *Configuration) String() string {
+	return fmt.Sprintf("{maxBatch=%d, maxNumTokens=%d, maxQueue=%d, servParms:%s}",
+		c.MaxBatchSize, c.MaxNumTokens, c.MaxQueueSize, c.ServiceParms)
+}
+
+func (qa *QueueAnalyzer) String() string {
+	return fmt.Sprintf("{maxBatch=%d, maxNumTokens=%d, maxQueue=%d, servParms:%s, reqSize:%s, model:%s, rates:%s}",
+		qa.MaxBatchSize, qa.MaxNumTokens, qa.MaxQueueSize, qa.ServiceParms, qa.RequestSize, qa.Model, qa.RateRange)
+}
+
+func (sp *ServiceParms) String() string {
+	return fmt.Sprintf("{alpha=%.3f, beta=%.5f, gamma=%.5f}", sp.Alpha, sp.Beta, sp.Gamma)
+}
+
+func (rq *RequestSize) String() string {
+	return fmt.Sprintf("{inTokens=%.1f, outTokens=%.1f}", rq.AvgInputTokens, rq.AvgOutputTokens)
+}
+
+func (rr *RateRange) String() string {
+	return fmt.Sprintf("[%.3f, %.3f]", rr.Min, rr.Max)
+}
+
+func (am *AnalysisMetrics) String() string {
+	return fmt.Sprintf("{tput=%.3f, lat=%.3f, wait=%.3f, conc=%.3f, ttft=%.3f, itl=%.3f, maxRate=%.3f, rho=%0.3f}",
+		am.Throughput, am.AvgRespTime, am.AvgWaitTime, am.AvgNumInServ, am.AvgTTFT, am.AvgTokenTime, am.MaxRate, am.Rho)
+}
+
+func (tp *TargetPerf) String() string {
+	return fmt.Sprintf("{TTFT=%.3f, ITL=%.3f, TPS=%.3f}",
+		tp.TargetTTFT, tp.TargetITL, tp.TargetTPS)
+}
+
+func (tr *TargetRate) String() string {
+	return fmt.Sprintf("{rateTTFT=%.3f, rateITL=%.3f, rateTPS=%.3f}",
+		tr.RateTargetTTFT, tr.RateTargetITL, tr.RateTargetTPS)
 }

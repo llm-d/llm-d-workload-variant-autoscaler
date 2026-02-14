@@ -12,14 +12,9 @@ var testConfig = &analyzer.Configuration{
 	MaxBatchSize: 8,
 	MaxQueueSize: 16,
 	ServiceParms: &analyzer.ServiceParms{
-		Prefill: &analyzer.PrefillParms{
-			Gamma: 10.0,
-			Delta: 0.001,
-		},
-		Decode: &analyzer.DecodeParms{
-			Alpha: 1.0,
-			Beta:  0.01,
-		},
+		Alpha: 1.0,
+		Beta:  0.01,
+		Gamma: 0.001,
 	},
 }
 
@@ -136,30 +131,6 @@ func TestConfiguration_Check(t *testing.T) {
 			},
 			wantErr: true,
 		},
-		{
-			name: "nil prefill parameters",
-			config: &analyzer.Configuration{
-				MaxBatchSize: 8,
-				MaxQueueSize: 16,
-				ServiceParms: &analyzer.ServiceParms{
-					Prefill: nil,
-					Decode:  testConfig.ServiceParms.Decode,
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "nil decode parameters",
-			config: &analyzer.Configuration{
-				MaxBatchSize: 8,
-				MaxQueueSize: 16,
-				ServiceParms: &analyzer.ServiceParms{
-					Prefill: testConfig.ServiceParms.Prefill,
-					Decode:  nil,
-				},
-			},
-			wantErr: true,
-		},
 	}
 
 	for _, tt := range tests {
@@ -224,9 +195,10 @@ func TestRequestSize_Check(t *testing.T) {
 }
 
 func TestPrefillParms_PrefillTime(t *testing.T) {
-	prefill := &analyzer.PrefillParms{
-		Gamma: 10.0,
-		Delta: 0.001,
+	parms := &analyzer.ServiceParms{
+		Alpha: 10.0,
+		Beta:  0.01,
+		Gamma: 0.001,
 	}
 
 	tests := []struct {
@@ -245,25 +217,28 @@ func TestPrefillParms_PrefillTime(t *testing.T) {
 			name:           "small batch",
 			avgInputTokens: 1000,
 			batchSize:      1.0,
-			expected:       11.0, // 10.0 + 0.001 * 1000 * 1.0
+			expected:       32.0,
 		},
 		{
 			name:           "large batch",
 			avgInputTokens: 2000,
 			batchSize:      8.0,
-			expected:       26.0, // 10.0 + 0.001 * 2000 * 8.0
+			expected:       208.0,
 		},
 		{
 			name:           "fractional batch size",
 			avgInputTokens: 500,
 			batchSize:      2.5,
-			expected:       11.25, // 10.0 + 0.001 * 500 * 2.5
+			expected:       29.25,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := prefill.PrefillTime(tt.avgInputTokens, tt.batchSize)
+			result := parms.PrefillTime(&analyzer.RequestSize{
+				AvgInputTokens:  float32(tt.avgInputTokens),
+				AvgOutputTokens: 0,
+			}, tt.batchSize)
 			if math.Abs(float64(result-tt.expected)) > 1e-6 {
 				t.Errorf("PrefillTime() = %v, expected %v", result, tt.expected)
 			}
@@ -272,9 +247,10 @@ func TestPrefillParms_PrefillTime(t *testing.T) {
 }
 
 func TestDecodeParms_DecodeTime(t *testing.T) {
-	decode := &analyzer.DecodeParms{
+	decode := &analyzer.ServiceParms{
 		Alpha: 1.0,
-		Beta:  0.01,
+		Beta:  0.1,
+		Gamma: 0.01,
 	}
 
 	tests := []struct {
@@ -285,28 +261,32 @@ func TestDecodeParms_DecodeTime(t *testing.T) {
 		{
 			name:      "single request",
 			batchSize: 1.0,
-			expected:  1.01, // 1.0 + 0.01 * 1.0
+			expected:  1.23,
 		},
 		{
 			name:      "medium batch",
 			batchSize: 4.0,
-			expected:  1.04, // 1.0 + 0.01 * 4.0
+			expected:  1.575,
 		},
 		{
 			name:      "large batch",
 			batchSize: 8.0,
-			expected:  1.08, // 1.0 + 0.01 * 8.0
+			expected:  2.035,
 		},
 		{
 			name:      "fractional batch size",
 			batchSize: 2.5,
-			expected:  1.025, // 1.0 + 0.01 * 2.5
+			expected:  1.4025,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := decode.DecodeTime(tt.batchSize)
+			result := decode.DecodeTime(
+				&analyzer.RequestSize{
+					AvgInputTokens:  1,
+					AvgOutputTokens: 1,
+				}, tt.batchSize)
 			if math.Abs(float64(result-tt.expected)) > 1e-6 {
 				t.Errorf("DecodeTime() = %v, expected %v", result, tt.expected)
 			}
@@ -553,52 +533,6 @@ func TestQueueAnalyzer_Size(t *testing.T) {
 	}
 }
 
-func TestEffectiveConcurrency(t *testing.T) {
-	serviceParms := testConfig.ServiceParms
-	requestSize := &analyzer.RequestSize{AvgInputTokens: 100, AvgOutputTokens: 10}
-	maxBatchSize := 8
-
-	tests := []struct {
-		name           string
-		avgServiceTime float32
-		expectedMin    float32
-		expectedMax    float32
-	}{
-		{
-			name:           "low service time",
-			avgServiceTime: 20.0,
-			expectedMin:    0.0,
-			expectedMax:    float32(maxBatchSize),
-		},
-		{
-			name:           "medium service time",
-			avgServiceTime: 50.0,
-			expectedMin:    0.0,
-			expectedMax:    float32(maxBatchSize),
-		},
-		{
-			name:           "high service time",
-			avgServiceTime: 100.0,
-			expectedMin:    0.0,
-			expectedMax:    float32(maxBatchSize),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := analyzer.EffectiveConcurrency(tt.avgServiceTime, serviceParms, requestSize, maxBatchSize)
-
-			if result < tt.expectedMin {
-				t.Errorf("EffectiveConcurrency() = %v, should be >= %v", result, tt.expectedMin)
-			}
-
-			if result > tt.expectedMax {
-				t.Errorf("EffectiveConcurrency() = %v, should be <= %v", result, tt.expectedMax)
-			}
-		})
-	}
-}
-
 func TestStringMethods(t *testing.T) {
 	config := testConfig
 	requestSize := &analyzer.RequestSize{AvgInputTokens: 100, AvgOutputTokens: 10}
@@ -633,14 +567,14 @@ func TestStringMethods(t *testing.T) {
 	})
 
 	t.Run("PrefillParms.String", func(t *testing.T) {
-		str := qa.ServiceParms.Prefill.String()
+		str := qa.ServiceParms.String()
 		if len(str) == 0 {
 			t.Error("PrefillParms.String() should not be empty")
 		}
 	})
 
 	t.Run("DecodeParms.String", func(t *testing.T) {
-		str := qa.ServiceParms.Decode.String()
+		str := qa.ServiceParms.String()
 		if len(str) == 0 {
 			t.Error("DecodeParms.String() should not be empty")
 		}

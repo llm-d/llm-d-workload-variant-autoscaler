@@ -88,13 +88,10 @@ func TestManager_Optimize(t *testing.T) {
 			AccCount:     1,
 			MaxBatchSize: 16,
 			AtTokens:     200,
-			PrefillParms: config.PrefillParms{
-				Gamma: 10.0,
-				Delta: 1.5,
-			},
-			DecodeParms: config.DecodeParms{
+			ServiceParms: config.ServiceParms{
 				Alpha: 5.0,
-				Beta:  2.0,
+				Beta:  0.2,
+				Gamma: 0.015,
 			},
 		}
 		model.AddPerfDataFromSpec(perfData)
@@ -120,7 +117,7 @@ func TestManager_Optimize(t *testing.T) {
 			MinNumReplicas: 1,
 			CurrentAlloc: config.AllocationData{
 				Load: config.ServerLoadSpec{
-					ArrivalRate:  120.0, // Non-zero arrival rate (2 req/sec)
+					ArrivalRate:  60.0, // Non-zero arrival rate (1 req/sec)
 					AvgInTokens:  100,
 					AvgOutTokens: 200,
 				},

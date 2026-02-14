@@ -68,13 +68,10 @@ func TestSystem_SetFromSpec(t *testing.T) {
 					AccCount:     1,
 					MaxBatchSize: 16,
 					AtTokens:     100,
-					DecodeParms: config.DecodeParms{
+					ServiceParms: config.ServiceParms{
 						Alpha: 10.0,
 						Beta:  2.0,
-					},
-					PrefillParms: config.PrefillParms{
-						Gamma: 5.0,
-						Delta: 0.1,
+						Gamma: 0.1,
 					},
 				},
 			},
@@ -443,13 +440,10 @@ func TestSystem_SetModelsFromSpec(t *testing.T) {
 				AccCount:     1,
 				MaxBatchSize: 16,
 				AtTokens:     100,
-				DecodeParms: config.DecodeParms{
+				ServiceParms: config.ServiceParms{
 					Alpha: 10.0,
 					Beta:  2.0,
-				},
-				PrefillParms: config.PrefillParms{
-					Gamma: 5.0,
-					Delta: 0.1,
+					Gamma: 0.1,
 				},
 			},
 			{
@@ -458,13 +452,10 @@ func TestSystem_SetModelsFromSpec(t *testing.T) {
 				AccCount:     2,
 				MaxBatchSize: 8,
 				AtTokens:     150,
-				DecodeParms: config.DecodeParms{
+				ServiceParms: config.ServiceParms{
 					Alpha: 15.0,
 					Beta:  3.0,
-				},
-				PrefillParms: config.PrefillParms{
-					Gamma: 8.0,
-					Delta: 0.15,
+					Gamma: 0.15,
 				},
 			},
 		},
@@ -497,17 +488,14 @@ func TestSystem_SetModelsFromSpec(t *testing.T) {
 	if perfData7b.AtTokens != 100 {
 		t.Errorf("Expected AtTokens 100 for llama-7b, got %d", perfData7b.AtTokens)
 	}
-	if perfData7b.DecodeParms.Alpha != 10.0 {
-		t.Errorf("Expected DecodeParms.Alpha 10.0 for llama-7b, got %f", perfData7b.DecodeParms.Alpha)
+	if perfData7b.ServiceParms.Alpha != 10.0 {
+		t.Errorf("Expected ServiceParms.Alpha 10.0 for llama-7b, got %f", perfData7b.ServiceParms.Alpha)
 	}
-	if perfData7b.DecodeParms.Beta != 2.0 {
-		t.Errorf("Expected DecodeParms.Beta 2.0 for llama-7b, got %f", perfData7b.DecodeParms.Beta)
+	if perfData7b.ServiceParms.Beta != 2.0 {
+		t.Errorf("Expected ServiceParms.Beta 2.0 for llama-7b, got %f", perfData7b.ServiceParms.Beta)
 	}
-	if perfData7b.PrefillParms.Gamma != 5.0 {
-		t.Errorf("Expected PrefillParms.Gamma 5.0 for llama-7b, got %f", perfData7b.PrefillParms.Gamma)
-	}
-	if perfData7b.PrefillParms.Delta != 0.1 {
-		t.Errorf("Expected PrefillParms.Delta 0.1 for llama-7b, got %f", perfData7b.PrefillParms.Delta)
+	if perfData7b.ServiceParms.Gamma != 0.1 {
+		t.Errorf("Expected ServiceParms.Gamma 0.1 for llama-7b, got %f", perfData7b.ServiceParms.Gamma)
 	}
 
 	// Validate llama-13b model
@@ -531,17 +519,14 @@ func TestSystem_SetModelsFromSpec(t *testing.T) {
 	if perfData13b.AtTokens != 150 {
 		t.Errorf("Expected AtTokens 150 for llama-13b, got %d", perfData13b.AtTokens)
 	}
-	if perfData13b.DecodeParms.Alpha != 15.0 {
-		t.Errorf("Expected DecodeParms.Alpha 15.0 for llama-13b, got %f", perfData13b.DecodeParms.Alpha)
+	if perfData13b.ServiceParms.Alpha != 15.0 {
+		t.Errorf("Expected ServiceParms.Alpha 15.0 for llama-13b, got %f", perfData13b.ServiceParms.Alpha)
 	}
-	if perfData13b.DecodeParms.Beta != 3.0 {
-		t.Errorf("Expected DecodeParms.Beta 3.0 for llama-13b, got %f", perfData13b.DecodeParms.Beta)
+	if perfData13b.ServiceParms.Beta != 3.0 {
+		t.Errorf("Expected ServiceParms.Beta 3.0 for llama-13b, got %f", perfData13b.ServiceParms.Beta)
 	}
-	if perfData13b.PrefillParms.Gamma != 8.0 {
-		t.Errorf("Expected PrefillParms.Gamma 8.0 for llama-13b, got %f", perfData13b.PrefillParms.Gamma)
-	}
-	if perfData13b.PrefillParms.Delta != 0.15 {
-		t.Errorf("Expected PrefillParms.Delta 0.15 for llama-13b, got %f", perfData13b.PrefillParms.Delta)
+	if perfData13b.ServiceParms.Gamma != 0.15 {
+		t.Errorf("Expected ServiceParms.Gamma 0.15 for llama-13b, got %f", perfData13b.ServiceParms.Gamma)
 	}
 }
 
@@ -1225,13 +1210,10 @@ func TestSystem_Calculate(t *testing.T) {
 		AccCount:     1,
 		MaxBatchSize: 16,
 		AtTokens:     100,
-		DecodeParms: config.DecodeParms{
+		ServiceParms: config.ServiceParms{
 			Alpha: 10.0,
 			Beta:  2.0,
-		},
-		PrefillParms: config.PrefillParms{
-			Gamma: 5.0,
-			Delta: 0.1,
+			Gamma: 0.1,
 		},
 	})
 
@@ -1326,13 +1308,10 @@ func TestSystem_AllocateByType(t *testing.T) {
 		AccCount:     1,
 		MaxBatchSize: 16,
 		AtTokens:     100,
-		DecodeParms: config.DecodeParms{
+		ServiceParms: config.ServiceParms{
 			Alpha: 10.0,
 			Beta:  2.0,
-		},
-		PrefillParms: config.PrefillParms{
-			Gamma: 5.0,
-			Delta: 0.1,
+			Gamma: 0.1,
 		},
 	})
 
@@ -1437,13 +1416,10 @@ func TestSystem_GenerateSolution(t *testing.T) {
 		AccCount:     1,
 		MaxBatchSize: 16,
 		AtTokens:     100,
-		DecodeParms: config.DecodeParms{
+		ServiceParms: config.ServiceParms{
 			Alpha: 10.0,
 			Beta:  2.0,
-		},
-		PrefillParms: config.PrefillParms{
-			Gamma: 5.0,
-			Delta: 0.1,
+			Gamma: 0.1,
 		},
 	})
 
