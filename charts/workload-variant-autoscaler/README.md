@@ -59,7 +59,7 @@ helm ls -A
 ```
 export OWNER="llm-d"
 export WVA_PROJECT="llm-d-workload-variant-autoscaler"
-export WVA_RELEASE="v0.4.1"
+export WVA_RELEASE="v0.5.1"
 export WVA_NS="workload-variant-autoscaler-system"
 export MON_NS="openshift-user-workload-monitoring"
 
