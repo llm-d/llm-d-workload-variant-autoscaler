@@ -108,5 +108,33 @@ func (l *DefaultLimiter) buildStepReason(d *interfaces.VariantDecision) string {
 	return fmt.Sprintf("allocated %d GPUs for +%d replicas", d.GPUsAllocated, replicaChange)
 }
 
+// ComputeConstraints refreshes the inventory and returns per-type resource availability.
+// This is the V2 path: expose constraints for the optimizer instead of modifying
+// decisions directly (which is what Limit() does for the V1 path).
+func (l *DefaultLimiter) ComputeConstraints(ctx context.Context, currentUsage map[string]int) (*ResourceConstraints, error) {
+	// Step 1: Refresh inventory (same as Limit step 1)
+	if err := l.inventory.Refresh(ctx); err != nil {
+		return nil, fmt.Errorf("failed to refresh inventory: %w", err)
+	}
+
+	// Step 2: Set current usage (same as Limit step 2)
+	l.inventory.SetUsed(currentUsage)
+
+	// Step 3: Expose per-type availability
+	pools := l.inventory.GetResourcePools()
+
+	rc := &ResourceConstraints{
+		ProviderName: l.name,
+		Pools:        pools,
+		TotalLimit:   l.inventory.TotalLimit(),
+		TotalUsed:    l.inventory.TotalUsed(),
+		TotalAvail:   l.inventory.TotalAvailable(),
+	}
+	return rc, nil
+}
+
 // Ensure DefaultLimiter implements Limiter interface
 var _ Limiter = (*DefaultLimiter)(nil)
+
+// Ensure DefaultLimiter implements ConstraintProvider interface
+var _ ConstraintProvider = (*DefaultLimiter)(nil)

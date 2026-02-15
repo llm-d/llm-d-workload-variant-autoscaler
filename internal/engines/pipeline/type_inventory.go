@@ -292,6 +292,27 @@ func (i *TypeInventory) AvailableByType(accType string) int {
 	return available
 }
 
+// GetResourcePools returns per-type resource availability as ResourcePool structs.
+func (i *TypeInventory) GetResourcePools() map[string]ResourcePool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+
+	pools := make(map[string]ResourcePool, len(i.limitByType))
+	for accType, limit := range i.limitByType {
+		used := i.usedByType[accType]
+		avail := limit - used
+		if avail < 0 {
+			avail = 0
+		}
+		pools[accType] = ResourcePool{
+			Limit:     limit,
+			Used:      used,
+			Available: avail,
+		}
+	}
+	return pools
+}
+
 // AcceleratorTypes returns all known accelerator types.
 func (i *TypeInventory) AcceleratorTypes() []string {
 	i.mu.RLock()
@@ -305,6 +326,9 @@ func (i *TypeInventory) AcceleratorTypes() []string {
 }
 
 // typeAllocator implements ResourceAllocator with per-type tracking.
+//
+// This allocator is NOT thread-safe and must not be shared across goroutines.
+// Create a new allocator per scaling decision batch using TypeInventory.CreateAllocator().
 //
 // This allocator ensures that:
 // - Each accelerator type has its own independent pool

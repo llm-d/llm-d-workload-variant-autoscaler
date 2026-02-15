@@ -66,6 +66,19 @@ func (m *mockInventory) TotalAvailable() int {
 	return m.TotalLimit() - m.TotalUsed()
 }
 
+func (m *mockInventory) GetResourcePools() map[string]ResourcePool {
+	pools := make(map[string]ResourcePool, len(m.limitByType))
+	for accType, limit := range m.limitByType {
+		used := m.usedByType[accType]
+		avail := limit - used
+		if avail < 0 {
+			avail = 0
+		}
+		pools[accType] = ResourcePool{Limit: limit, Used: used, Available: avail}
+	}
+	return pools
+}
+
 // mockTypeAllocator implements ResourceAllocator for testing
 type mockTypeAllocator struct {
 	availableByType map[string]int
