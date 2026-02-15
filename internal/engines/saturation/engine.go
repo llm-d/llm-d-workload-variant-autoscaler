@@ -490,9 +490,9 @@ func (e *Engine) BuildVariantStates(
 				continue
 			}
 			deploy = fetchedDeploy
-			ctrl.LoggerFrom(ctx).V(1).Info("BuildVariantStates fallback lookup", "variant", va.Name, "deployName", deploy.Name, "specReplicas", deploy.Spec.Replicas, "statusReplicas", deploy.Status.Replicas, "readyReplicas", deploy.Status.ReadyReplicas)
+			ctrl.LoggerFrom(ctx).V(logging.DEBUG).Info("BuildVariantStates fallback lookup", "variant", va.Name, "deployName", deploy.Name, "specReplicas", deploy.Spec.Replicas, "statusReplicas", deploy.Status.Replicas, "readyReplicas", deploy.Status.ReadyReplicas)
 		} else {
-			ctrl.LoggerFrom(ctx).V(1).Info("BuildVariantStates map lookup", "variant", va.Name, "deployName", deploy.Name, "specReplicas", deploy.Spec.Replicas, "statusReplicas", deploy.Status.Replicas, "readyReplicas", deploy.Status.ReadyReplicas)
+			ctrl.LoggerFrom(ctx).V(logging.DEBUG).Info("BuildVariantStates map lookup", "variant", va.Name, "deployName", deploy.Name, "specReplicas", deploy.Spec.Replicas, "statusReplicas", deploy.Status.Replicas, "readyReplicas", deploy.Status.ReadyReplicas)
 		}
 
 		currentReplicas := int(deploy.Status.Replicas)
@@ -514,7 +514,7 @@ func (e *Engine) BuildVariantStates(
 		// Extract GPUs per replica from deployment's pod template
 		gpusPerReplica := getDeploymentGPUsPerReplica(deploy)
 
-		ctrl.LoggerFrom(ctx).V(1).Info("BuildVariantStates result", "variant", va.Name, "currentReplicas", currentReplicas, "readyReplicas", readyReplicas, "pendingReplicas", pendingReplicas, "gpusPerReplica", gpusPerReplica)
+		ctrl.LoggerFrom(ctx).V(logging.DEBUG).Info("BuildVariantStates result", "variant", va.Name, "currentReplicas", currentReplicas, "readyReplicas", readyReplicas, "pendingReplicas", pendingReplicas, "gpusPerReplica", gpusPerReplica)
 
 		states = append(states, interfaces.VariantReplicaState{
 			VariantName:     va.Name,
@@ -682,7 +682,7 @@ func (e *Engine) prepareModelData(
 			if parsedCost, err := strconv.ParseFloat(va.Spec.VariantCost, 64); err == nil {
 				cost = parsedCost
 			} else {
-				logger.V(1).Info("Failed to parse variant cost, using default",
+				logger.V(logging.DEBUG).Info("Failed to parse variant cost, using default",
 					"variant", va.Name, "variantCost", va.Spec.VariantCost, "default", cost, "error", err)
 			}
 		}

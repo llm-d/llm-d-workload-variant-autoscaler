@@ -10,6 +10,7 @@ import (
 	llmdVariantAutoscalingV1alpha1 "github.com/llm-d/llm-d-workload-variant-autoscaler/api/v1alpha1"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/engines/pipeline"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/logging"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils"
 )
 
@@ -32,14 +33,14 @@ func (e *Engine) runV2AnalysisOnly(
 		deployKey := utils.GetNamespacedKey(va.Namespace, va.GetScaleTargetName())
 		deploy := deployments[deployKey]
 		if deploy == nil {
-			logger.V(1).Info("No deployment found for VA, skipping capacity store pre-population",
+			logger.V(logging.DEBUG).Info("No deployment found for VA, skipping capacity store pre-population",
 				"variant", va.Name, "deployKey", deployKey)
 			continue
 		}
 		accelerator := utils.GetAcceleratorType(va)
 		gpuCount := getDeploymentGPUsPerReplica(deploy)
 		e.capacityStore.LoadFromDeployment(namespace, modelID, va.Name, accelerator, gpuCount, deploy)
-		logger.V(1).Info("Pre-populated capacity store from deployment",
+		logger.V(logging.DEBUG).Info("Pre-populated capacity store from deployment",
 			"variant", va.Name, "accelerator", accelerator, "gpuCount", gpuCount)
 	}
 

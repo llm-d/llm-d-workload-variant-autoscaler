@@ -9,6 +9,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/logging"
 )
 
 // CostAwareOptimizer is a per-model optimizer that minimizes total cost while
@@ -59,7 +60,7 @@ func (o *CostAwareOptimizer) Optimize(
 		}
 
 		decisions := buildDecisions(req, stateMap, vcMap, targets)
-		logger.V(1).Info("Cost-aware optimizer decisions",
+		logger.V(logging.DEBUG).Info("Cost-aware optimizer decisions",
 			"modelID", req.ModelID,
 			"decisions", len(decisions))
 		allDecisions = append(allDecisions, decisions...)
@@ -96,7 +97,7 @@ func costAwareScaleUp(
 		targets[vc.VariantName] = targets[vc.VariantName] + replicasNeeded
 		remaining -= float64(replicasNeeded) * vc.PerReplicaCapacity
 
-		logger.V(1).Info("Scale-up allocation",
+		logger.V(logging.DEBUG).Info("Scale-up allocation",
 			"variant", vc.VariantName,
 			"added", replicasNeeded,
 			"costEfficiency", costEfficiency(vc))
@@ -160,7 +161,7 @@ func costAwareScaleDown(
 		targets[vc.VariantName] = current - replicasToRemove
 		remaining -= float64(replicasToRemove) * vc.PerReplicaCapacity
 
-		logger.V(1).Info("Scale-down allocation",
+		logger.V(logging.DEBUG).Info("Scale-down allocation",
 			"variant", vc.VariantName,
 			"removed", replicasToRemove,
 			"cost", vc.Cost)
