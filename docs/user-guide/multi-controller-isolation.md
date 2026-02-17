@@ -48,6 +48,59 @@ wva:
 
 Each team's controller only manages VAs in their designated namespace with matching labels.
 
+### Adding Models to an Existing Controller
+
+The most common multi-model pattern uses a **single controller** with multiple model
+installations. Install the controller once, then add models using `controller.enabled=false`:
+
+```bash
+# Step 1: Install the WVA controller (once per cluster or namespace)
+helm upgrade -i wva-controller ./charts/workload-variant-autoscaler \
+  --namespace wva-system \
+  --create-namespace \
+  --set controller.enabled=true \
+  --set va.enabled=false \
+  --set hpa.enabled=false \
+  --set vllmService.enabled=false
+```
+
+```bash
+# Step 2: Add Model A (only VA + HPA resources, no controller)
+helm upgrade -i wva-model-a ./charts/workload-variant-autoscaler \
+  --namespace wva-system \
+  --set controller.enabled=false \
+  --set va.enabled=true \
+  --set hpa.enabled=true \
+  --set llmd.namespace=team-a \
+  --set llmd.modelName=my-model-a \
+  --set llmd.modelID="meta-llama/Llama-3.1-8B"
+```
+
+```bash
+# Step 3: Add Model B (same controller manages both models)
+helm upgrade -i wva-model-b ./charts/workload-variant-autoscaler \
+  --namespace wva-system \
+  --set controller.enabled=false \
+  --set va.enabled=true \
+  --set hpa.enabled=true \
+  --set llmd.namespace=team-b \
+  --set llmd.modelName=my-model-b \
+  --set llmd.modelID="meta-llama/Llama-3.1-70B"
+```
+
+With `controller.enabled=false`, the chart deploys only:
+
+- **VariantAutoscaling** CR (if `va.enabled=true`)
+- **HorizontalPodAutoscaler** (if `hpa.enabled=true`)
+- **Service** and **ServiceMonitor** for vLLM metrics (if `vllmService.enabled=true`)
+- **RBAC** ClusterRoles for VA resources (viewer, editor, admin)
+
+It skips all controller infrastructure: Deployment, ServiceAccount, ConfigMaps, RBAC
+bindings, leader election roles, and prometheus CA certificates.
+
+> **Tip:** If using `controllerInstance` for metric isolation, set the same value on both the
+> controller install and all model installs so the HPA metric selectors match.
+
 ### Canary/Blue-Green Deployments
 
 Test new WVA versions alongside production:
