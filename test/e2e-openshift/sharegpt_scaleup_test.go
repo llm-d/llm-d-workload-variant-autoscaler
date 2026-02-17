@@ -18,6 +18,7 @@ package e2eopenshift
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -344,8 +345,20 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 					resultStr := string(result)
 					g.Expect(resultStr).To(ContainSubstring(constants.WVADesiredReplicas), "Metric should be available")
 					g.Expect(resultStr).To(ContainSubstring(vaName), "Metric should be for the correct variant")
-					_, _ = fmt.Fprintf(GinkgoWriter, "External metrics API response (selector: %s): %s\n",
-						hpaMetricSelector, truncateString(resultStr, 500))
+					// Parse to extract the actual metric value for clear diagnostics
+					var metricValueList struct {
+						Items []struct {
+							MetricName string `json:"metricName"`
+							Value      string `json:"value"`
+						} `json:"items"`
+					}
+					if jErr := json.Unmarshal(result, &metricValueList); jErr == nil && len(metricValueList.Items) > 0 {
+						_, _ = fmt.Fprintf(GinkgoWriter, "External metrics API: value=%s, items=%d (selector: %s)\n",
+							metricValueList.Items[0].Value, len(metricValueList.Items), hpaMetricSelector)
+					} else {
+						_, _ = fmt.Fprintf(GinkgoWriter, "External metrics API response (selector: %s): %s\n",
+							hpaMetricSelector, truncateString(resultStr, 500))
+					}
 				}, 5*time.Minute, 5*time.Second).Should(Succeed())
 			})
 
@@ -531,7 +544,19 @@ exit 1`,
 							AbsPath("/apis/external.metrics.k8s.io/v1beta1/namespaces/" + model.namespace + "/" + constants.WVADesiredReplicas).
 							Param("labelSelector", hpaMetricSelector).
 							DoRaw(ctx); qErr == nil {
-							_, _ = fmt.Fprintf(GinkgoWriter, "  External metric (HPA labels): %s\n", truncateString(string(result), 300))
+							// Parse the metric value from the JSON response rather than truncating the raw JSON
+							var metricList struct {
+								Items []struct {
+									MetricName string `json:"metricName"`
+									Value      string `json:"value"`
+								} `json:"items"`
+							}
+							if jErr := json.Unmarshal(result, &metricList); jErr == nil && len(metricList.Items) > 0 {
+								_, _ = fmt.Fprintf(GinkgoWriter, "  External metric value: %s (metric: %s, items: %d)\n",
+									metricList.Items[0].Value, metricList.Items[0].MetricName, len(metricList.Items))
+							} else {
+								_, _ = fmt.Fprintf(GinkgoWriter, "  External metric (HPA labels): %s\n", truncateString(string(result), 500))
+							}
 						} else {
 							_, _ = fmt.Fprintf(GinkgoWriter, "  External metric query error: %v\n", qErr)
 						}
@@ -554,8 +579,38 @@ exit 1`,
 					g.Expect(err).NotTo(HaveOccurred(), "Should be able to get deployment")
 
 					scaledReplicas = deploy.Status.ReadyReplicas
-					_, _ = fmt.Fprintf(GinkgoWriter, "Current ready replicas: %d (initial: %d, desired: %d)\n",
-						scaledReplicas, initialReplicas, scaledOptimized)
+					specReplicas := int32(0)
+					if deploy.Spec.Replicas != nil {
+						specReplicas = *deploy.Spec.Replicas
+					}
+					_, _ = fmt.Fprintf(GinkgoWriter, "Deployment: spec=%d, total=%d, ready=%d, unavailable=%d (initial: %d, target: %d)\n",
+						specReplicas, deploy.Status.Replicas, scaledReplicas,
+						deploy.Status.UnavailableReplicas, initialReplicas, scaledOptimized)
+
+					// List pod phases to show Pending/ContainerCreating pods that aren't ready yet
+					if deploy.Spec.Selector != nil {
+						var selectorParts []string
+						for k, v := range deploy.Spec.Selector.MatchLabels {
+							selectorParts = append(selectorParts, fmt.Sprintf("%s=%s", k, v))
+						}
+						if pods, pErr := k8sClient.CoreV1().Pods(model.namespace).List(ctx, metav1.ListOptions{
+							LabelSelector: strings.Join(selectorParts, ","),
+						}); pErr == nil {
+							for _, pod := range pods.Items {
+								phase := string(pod.Status.Phase)
+								reason := ""
+								for _, cs := range pod.Status.ContainerStatuses {
+									if cs.State.Waiting != nil {
+										reason = cs.State.Waiting.Reason
+									}
+								}
+								if reason != "" {
+									phase = fmt.Sprintf("%s (%s)", phase, reason)
+								}
+								_, _ = fmt.Fprintf(GinkgoWriter, "  Pod %s: %s\n", pod.Name, phase)
+							}
+						}
+					}
 
 					if !lowLoad {
 						g.Expect(deploy.Status.Replicas).To(BeNumerically(">", hpaMinReplicas),
