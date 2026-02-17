@@ -13,23 +13,34 @@ var (
 )
 
 // PDRole represents the Prefill/Decode role of a deployment in a P/D disaggregation setup.
+//
+// Role values and label key are aligned with llm-d-inference-scheduler
+// (pkg/plugins/filter/pd_role.go). We redefine them locally as typed constants
+// to avoid importing that module (heavyweight dependency not otherwise needed)
+// and to add RoleUnknown which the scheduler doesn't define.
 type PDRole string
 
 const (
 	// RolePrefill indicates a prefill-only deployment (KV cache producer).
+	// Matches filter.RolePrefill in llm-d-inference-scheduler.
 	RolePrefill PDRole = "prefill"
 	// RoleDecode indicates a decode-only deployment (KV cache consumer).
+	// Matches filter.RoleDecode in llm-d-inference-scheduler.
 	RoleDecode PDRole = "decode"
 	// RoleBoth indicates a deployment serving both prefill and decode.
+	// Matches filter.RoleBoth in llm-d-inference-scheduler.
 	RoleBoth PDRole = "both"
 	// RoleUnknown indicates the P/D role could not be determined.
+	// Not defined in llm-d-inference-scheduler (WVA-specific).
 	RoleUnknown PDRole = "unknown"
 
 	// DefaultRoleLabel is the well-known label key used by llm-d-inference-scheduler
 	// to identify P/D roles on pods.
+	// Matches filter.RoleLabel in llm-d-inference-scheduler.
 	DefaultRoleLabel = "llm-d.ai/role"
 
 	// Plugin types from llm-d-inference-scheduler used in EndpointPickerConfig.
+	// Match filter.PrefillRoleType and filter.DecodeRoleType respectively.
 	PluginTypePrefillFilter = "prefill-filter"
 	PluginTypeDecodeFilter  = "decode-filter"
 	PluginTypeByLabel       = "by-label"

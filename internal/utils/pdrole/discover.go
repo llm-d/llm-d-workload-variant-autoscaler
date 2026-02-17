@@ -3,6 +3,8 @@ package pdrole
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sort"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -41,18 +43,21 @@ type byLabelParams struct {
 //     equally — all deployments effectively serve both prefill and decode.
 //     Callers should treat all deployments as RoleBoth.
 //
+// Returns an error if the discovery chain encounters a Kubernetes API failure
+// (service lookup, deployment listing, ConfigMap fetch). Non-error conditions
+// (nil pool, no P/D plugins) return Disaggregated=false with nil error.
+//
 // Discovery chain:
 //  1. Extract EPP service name and namespace from the pool's EndpointPicker
 //  2. Find EPP deployment via service selector matching
 //  3. Find ConfigMaps mounted as volumes in EPP deployment
 //  4. Parse ConfigMap data as EndpointPickerConfig (YAML/JSON)
 //  5. Extract P/D label config from filter plugins
-//  6. If any step fails, return Disaggregated=false with DefaultPDRoleLabelConfig()
 func DiscoverPDRoleLabelConfig(
 	ctx context.Context,
 	k8sClient client.Client,
 	pool *poolutil.EndpointPool,
-) PDDiscoveryResult {
+) (PDDiscoveryResult, error) {
 	logger := ctrl.LoggerFrom(ctx)
 
 	notDisaggregated := PDDiscoveryResult{
@@ -62,7 +67,7 @@ func DiscoverPDRoleLabelConfig(
 
 	if pool == nil || pool.EndpointPicker == nil {
 		logger.V(logging.DEBUG).Info("No pool or EndpointPicker provided, P/D disaggregation not detected")
-		return notDisaggregated
+		return notDisaggregated, nil
 	}
 
 	eppServiceName := pool.EndpointPicker.ServiceName
@@ -71,34 +76,22 @@ func DiscoverPDRoleLabelConfig(
 	// Step 1: Find EPP deployment from service
 	deploy, err := findEPPDeployment(ctx, k8sClient, namespace, eppServiceName)
 	if err != nil {
-		logger.V(logging.DEBUG).Info("Could not find EPP deployment, P/D disaggregation not detected",
-			"pool", pool.Name,
-			"eppService", eppServiceName,
-			"namespace", namespace,
-			"error", err)
-		return notDisaggregated
+		return notDisaggregated, fmt.Errorf("finding EPP deployment for pool %s (service %s/%s): %w",
+			pool.Name, namespace, eppServiceName, err)
 	}
 
 	// Step 2: Find ConfigMap from deployment volumes
 	configData, err := findConfigDataFromDeployment(ctx, k8sClient, deploy)
 	if err != nil {
-		logger.V(logging.DEBUG).Info("Could not find EPP config from deployment, P/D disaggregation not detected",
-			"pool", pool.Name,
-			"deployment", deploy.Name,
-			"namespace", namespace,
-			"error", err)
-		return notDisaggregated
+		return notDisaggregated, fmt.Errorf("finding EPP config from deployment %s/%s: %w",
+			namespace, deploy.Name, err)
 	}
 
 	// Step 3: Parse EndpointPickerConfig
 	epc, err := parseEndpointPickerConfig(configData)
 	if err != nil {
-		logger.V(logging.DEBUG).Info("Could not parse EndpointPickerConfig, P/D disaggregation not detected",
-			"pool", pool.Name,
-			"deployment", deploy.Name,
-			"namespace", namespace,
-			"error", err)
-		return notDisaggregated
+		return notDisaggregated, fmt.Errorf("parsing EndpointPickerConfig from deployment %s/%s: %w",
+			namespace, deploy.Name, err)
 	}
 
 	// Step 4: Extract P/D label config from plugins
@@ -108,7 +101,7 @@ func DiscoverPDRoleLabelConfig(
 			"pool", pool.Name,
 			"deployment", deploy.Name,
 			"namespace", namespace)
-		return notDisaggregated
+		return notDisaggregated, nil
 	}
 
 	logger.V(logging.DEBUG).Info("Discovered P/D label config from EndpointPickerConfig",
@@ -120,7 +113,7 @@ func DiscoverPDRoleLabelConfig(
 	return PDDiscoveryResult{
 		LabelConfig:   config,
 		Disaggregated: true,
-	}
+	}, nil
 }
 
 // findEPPDeployment finds the EPP deployment by looking up the service and matching
@@ -169,10 +162,15 @@ func findConfigDataFromDeployment(ctx context.Context, k8sClient client.Client, 
 			continue // Try next volume
 		}
 
-		// Look for config data in the ConfigMap
-		for key, data := range cm.Data {
+		// Look for config data in the ConfigMap (sorted keys for deterministic traversal)
+		keys := make([]string, 0, len(cm.Data))
+		for key := range cm.Data {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
 			if isConfigKey(key) {
-				return []byte(data), nil
+				return []byte(cm.Data[key]), nil
 			}
 		}
 	}

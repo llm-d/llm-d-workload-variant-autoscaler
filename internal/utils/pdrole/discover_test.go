@@ -125,8 +125,9 @@ var _ = Describe("DiscoverPDRoleLabelConfig", func() {
 			}
 			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
 
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
 
+			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Disaggregated).To(BeTrue())
 			expected := DefaultPDRoleLabelConfig()
 			Expect(result.LabelConfig.LabelKey).To(Equal(expected.LabelKey))
@@ -157,8 +158,9 @@ var _ = Describe("DiscoverPDRoleLabelConfig", func() {
 			}
 			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
 
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
 
+			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Disaggregated).To(BeTrue())
 			Expect(result.LabelConfig.LabelKey).To(Equal("custom.io/role"))
 			Expect(result.LabelConfig.PrefillValues).To(Equal([]string{"pf"}))
@@ -188,8 +190,9 @@ var _ = Describe("DiscoverPDRoleLabelConfig", func() {
 			}
 			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
 
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
 
+			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Disaggregated).To(BeTrue())
 			Expect(result.LabelConfig.LabelKey).To(Equal("custom.io/role"))
 			Expect(result.LabelConfig.PrefillValues).To(Equal([]string{"pf"}))
@@ -198,72 +201,25 @@ var _ = Describe("DiscoverPDRoleLabelConfig", func() {
 		})
 	})
 
-	Context("fallback scenarios (disaggregated=false)", func() {
-		It("should return disaggregated=false when pool is nil", func() {
+	Context("fallback scenarios (disaggregated=false, no error)", func() {
+		It("should return disaggregated=false with nil error when pool is nil", func() {
 			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).Build()
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, nil)
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, nil)
+			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Disaggregated).To(BeFalse())
 			Expect(result.LabelConfig).To(Equal(DefaultPDRoleLabelConfig()))
 		})
 
-		It("should return disaggregated=false when pool has nil EndpointPicker", func() {
+		It("should return disaggregated=false with nil error when pool has nil EndpointPicker", func() {
 			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).Build()
 			poolNoEPP := &poolutil.EndpointPool{Name: "no-epp", Namespace: testNamespace}
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, poolNoEPP)
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, poolNoEPP)
+			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Disaggregated).To(BeFalse())
 			Expect(result.LabelConfig).To(Equal(DefaultPDRoleLabelConfig()))
 		})
 
-		It("should return disaggregated=false when service not found", func() {
-			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).Build()
-			poolMissing := makePool("missing-pool", testNamespace, "nonexistent")
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, poolMissing)
-			Expect(result.Disaggregated).To(BeFalse())
-			Expect(result.LabelConfig).To(Equal(DefaultPDRoleLabelConfig()))
-		})
-
-		It("should return disaggregated=false when no deployment matches service selector", func() {
-			objects := []client.Object{
-				makeService("epp-svc", testNamespace, eppLabels),
-			}
-			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
-			Expect(result.Disaggregated).To(BeFalse())
-		})
-
-		It("should return disaggregated=false when no ConfigMap is mounted", func() {
-			objects := []client.Object{
-				makeService("epp-svc", testNamespace, eppLabels),
-				makeEPPDeployment("epp", testNamespace, eppLabels, ""),
-			}
-			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
-			Expect(result.Disaggregated).To(BeFalse())
-		})
-
-		It("should return disaggregated=false when ConfigMap has invalid data", func() {
-			objects := []client.Object{
-				makeService("epp-svc", testNamespace, eppLabels),
-				makeEPPDeployment("epp", testNamespace, eppLabels, "epp-config"),
-				makeConfigMap("epp-config", testNamespace, map[string]string{"config.yaml": "not valid yaml {{{"}),
-			}
-			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
-			Expect(result.Disaggregated).To(BeFalse())
-		})
-
-		It("should return disaggregated=false when config has no plugins or profiles", func() {
-			objects := []client.Object{
-				makeService("epp-svc", testNamespace, eppLabels),
-				makeEPPDeployment("epp", testNamespace, eppLabels, "epp-config"),
-				makeConfigMap("epp-config", testNamespace, map[string]string{"config.yaml": `{}`}),
-			}
-			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
-			Expect(result.Disaggregated).To(BeFalse())
-		})
-
-		It("should return disaggregated=false when config has no P/D plugins", func() {
+		It("should return disaggregated=false with nil error when config has no P/D plugins", func() {
 			configJSON := buildConfigJSON(
 				[]epconfigv1alpha1.PluginSpec{{Name: "scorer", Type: "kv-cache-scorer"}},
 				[]epconfigv1alpha1.SchedulingProfile{
@@ -276,17 +232,74 @@ var _ = Describe("DiscoverPDRoleLabelConfig", func() {
 				makeConfigMap("epp-config", testNamespace, map[string]string{"config.yaml": configJSON}),
 			}
 			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Disaggregated).To(BeFalse())
+		})
+	})
+
+	Context("error scenarios", func() {
+		It("should return error when service not found", func() {
+			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).Build()
+			poolMissing := makePool("missing-pool", testNamespace, "nonexistent")
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, poolMissing)
+			Expect(err).To(HaveOccurred())
 			Expect(result.Disaggregated).To(BeFalse())
 		})
 
-		It("should return disaggregated=false when service has no selector", func() {
+		It("should return error when no deployment matches service selector", func() {
+			objects := []client.Object{
+				makeService("epp-svc", testNamespace, eppLabels),
+			}
+			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
+			Expect(err).To(HaveOccurred())
+			Expect(result.Disaggregated).To(BeFalse())
+		})
+
+		It("should return error when no ConfigMap is mounted", func() {
+			objects := []client.Object{
+				makeService("epp-svc", testNamespace, eppLabels),
+				makeEPPDeployment("epp", testNamespace, eppLabels, ""),
+			}
+			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
+			Expect(err).To(HaveOccurred())
+			Expect(result.Disaggregated).To(BeFalse())
+		})
+
+		It("should return error when ConfigMap has invalid data", func() {
+			objects := []client.Object{
+				makeService("epp-svc", testNamespace, eppLabels),
+				makeEPPDeployment("epp", testNamespace, eppLabels, "epp-config"),
+				makeConfigMap("epp-config", testNamespace, map[string]string{"config.yaml": "not valid yaml {{{"}),
+			}
+			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
+			Expect(err).To(HaveOccurred())
+			Expect(result.Disaggregated).To(BeFalse())
+		})
+
+		It("should return error when config has no plugins or profiles", func() {
+			objects := []client.Object{
+				makeService("epp-svc", testNamespace, eppLabels),
+				makeEPPDeployment("epp", testNamespace, eppLabels, "epp-config"),
+				makeConfigMap("epp-config", testNamespace, map[string]string{"config.yaml": `{}`}),
+			}
+			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(objects...).Build()
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
+			Expect(err).To(HaveOccurred())
+			Expect(result.Disaggregated).To(BeFalse())
+		})
+
+		It("should return error when service has no selector", func() {
 			svc := &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{Name: "epp-svc", Namespace: testNamespace},
 				Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "metrics", Port: 9090}}},
 			}
 			k8sClient := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(svc).Build()
-			result := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
+			result, err := DiscoverPDRoleLabelConfig(ctx, k8sClient, pool)
+			Expect(err).To(HaveOccurred())
 			Expect(result.Disaggregated).To(BeFalse())
 		})
 	})
