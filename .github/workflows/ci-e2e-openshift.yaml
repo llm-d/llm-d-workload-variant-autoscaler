@@ -608,6 +608,15 @@ jobs:
           VLLM_MAX_NUM_SEQS: ${{ env.MAX_NUM_SEQS }}
           # Decode replicas for e2e testing (start with 1 replica, let HPA scale)
           DECODE_REPLICAS: "1"
+          # OpenShift uses built-in user-workload monitoring, not a separate namespace
+          MONITORING_NAMESPACE: openshift-user-workload-monitoring
+          # Disable bearer token auth on WVA /metrics endpoint — OpenShift's
+          # user-workload-monitoring cannot authenticate with the controller-manager
+          # SA token. The endpoint is still only accessible within the cluster network.
+          WVA_METRICS_SECURE: "false"
+          # inference-scheduling guide has routing proxy disabled, so vLLM
+          # serves directly on port 8000 (not 8200 behind proxy)
+          VLLM_SVC_PORT: "8000"
         run: |
           echo "Deploying WVA and llm-d infrastructure..."
           echo "  MODEL_ID: $MODEL_ID"
@@ -639,9 +648,38 @@ jobs:
       - name: Wait for infrastructure to be ready
         run: |
           echo "Waiting for WVA controller to be ready..."
-          kubectl wait --for=condition=available --timeout=300s deployment -l app.kubernetes.io/name=workload-variant-autoscaler -n "$WVA_NAMESPACE" || true
+          kubectl rollout status deployment -l app.kubernetes.io/name=workload-variant-autoscaler -n "$WVA_NAMESPACE" --timeout=300s || true
           kubectl get pods -n "$WVA_NAMESPACE"
-          echo "Waiting for llm-d deployment (Model A1) to be ready..."
+
+          # Ensure the vLLM deployment has the correct replica count.
+          # A previous failed run's "Scale down GPU workloads" step may have set replicas=0
+          # and helmfile doesn't override manually-changed replicas on re-deploy.
+          # kubectl rollout status returns instantly on 0-replica deployments, so we must
+          # ensure replicas > 0 before waiting.
+          DESIRED_REPLICAS="${DECODE_REPLICAS:-1}"
+          CURRENT_REPLICAS=$(kubectl get deployment ms-inference-scheduling-llm-d-modelservice-decode -n "$LLMD_NAMESPACE" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+          if [ "$CURRENT_REPLICAS" -eq 0 ]; then
+            echo "WARNING: Model A1 deployment has 0 replicas (likely from previous failed run cleanup)"
+            echo "Scaling to $DESIRED_REPLICAS replica(s)..."
+            kubectl scale deployment/ms-inference-scheduling-llm-d-modelservice-decode -n "$LLMD_NAMESPACE" --replicas="$DESIRED_REPLICAS" || {
+              echo "ERROR: Failed to scale Model A1 deployment"
+              exit 1
+            }
+          fi
+
+          echo "Waiting for Model A1 vLLM deployment to be ready (up to 25 minutes for model loading)..."
+          # kubectl rollout status waits for all replicas to be Ready, unlike
+          # --for=condition=available which is satisfied even at 0 ready replicas.
+          # vLLM model loading takes 15-20 minutes, so we use a 25-minute timeout.
+          kubectl rollout status deployment/ms-inference-scheduling-llm-d-modelservice-decode -n "$LLMD_NAMESPACE" --timeout=1500s || {
+            echo "WARNING: Model A1 deployment not ready after 25 minutes"
+            echo "=== Pod status ==="
+            kubectl get pods -n "$LLMD_NAMESPACE"
+            echo "=== Deployment conditions ==="
+            kubectl get deployment ms-inference-scheduling-llm-d-modelservice-decode -n "$LLMD_NAMESPACE" -o jsonpath='{.status.conditions}' | jq . || true
+            echo "=== Recent events ==="
+            kubectl get events -n "$LLMD_NAMESPACE" --sort-by='.lastTimestamp' | tail -20
+          }
           kubectl get pods -n "$LLMD_NAMESPACE"
 
       - name: Deploy Model B infrastructure in secondary namespace
@@ -666,6 +704,11 @@ jobs:
           VLLM_MAX_NUM_SEQS: ${{ env.MAX_NUM_SEQS }}
           # Decode replicas for e2e testing (start with 1 replica, let HPA scale)
           DECODE_REPLICAS: "1"
+          # OpenShift monitoring settings (same as Model A1 deploy)
+          MONITORING_NAMESPACE: openshift-user-workload-monitoring
+          WVA_METRICS_SECURE: "false"
+          # Same port as Model A1 (inference-scheduling guide, proxy disabled)
+          VLLM_SVC_PORT: "8000"
         run: |
           echo "Deploying Model B infrastructure in $LLMD_NAMESPACE_B..."
           echo "  MODEL_ID: $MODEL_ID"
@@ -676,8 +719,9 @@ jobs:
           # Deploy llm-d infrastructure only (no WVA controller, no VA/HPA)
           ./deploy/install.sh --model "$MODEL_ID" --accelerator "$ACCELERATOR_TYPE" --environment openshift
 
-          echo "Waiting for Model B deployment to be ready..."
-          kubectl wait --for=condition=available --timeout=300s deployment --all -n "$LLMD_NAMESPACE_B" || true
+          echo "Waiting for Model B deployment to start (initial rollout)..."
+          # Wait briefly for deployments to be created by helm before checking rollout status
+          sleep 10
           kubectl get pods -n "$LLMD_NAMESPACE_B"
 
       - name: Deploy Model B WVA resources
@@ -707,11 +751,40 @@ jobs:
             --set va.accelerator="$ACCELERATOR_TYPE" \
             --set wva.baseName="inference-scheduling" \
             --set wva.prometheus.monitoringNamespace=openshift-user-workload-monitoring \
+            --set wva.metrics.secure=false \
+            --set vllmService.port=8000 \
+            --set vllmService.targetPort=8000 \
             --set wva.controllerInstance="$CONTROLLER_INSTANCE"
 
           echo "Model B WVA resources deployed"
           kubectl get hpa -n "$LLMD_NAMESPACE_B" -l app.kubernetes.io/instance="$MODEL_B_RELEASE" || true
           kubectl get variantautoscaling -n "$LLMD_NAMESPACE_B" -l app.kubernetes.io/instance="$MODEL_B_RELEASE" || true
+
+      - name: Wait for Model B to be ready
+        run: |
+          # Same fix as Model A1: ensure replicas > 0 before waiting for rollout
+          DESIRED_REPLICAS="${DECODE_REPLICAS:-1}"
+          CURRENT_REPLICAS=$(kubectl get deployment ms-inference-scheduling-llm-d-modelservice-decode -n "$LLMD_NAMESPACE_B" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+          if [ "$CURRENT_REPLICAS" -eq 0 ]; then
+            echo "WARNING: Model B deployment has 0 replicas (likely from previous failed run cleanup)"
+            echo "Scaling to $DESIRED_REPLICAS replica(s)..."
+            kubectl scale deployment/ms-inference-scheduling-llm-d-modelservice-decode -n "$LLMD_NAMESPACE_B" --replicas="$DESIRED_REPLICAS" || {
+              echo "ERROR: Failed to scale Model B deployment"
+              exit 1
+            }
+          fi
+
+          echo "Waiting for Model B vLLM deployment to be ready (up to 25 minutes for model loading)..."
+          # Same as Model A1: use rollout status to wait for actual pod readiness.
+          kubectl rollout status deployment/ms-inference-scheduling-llm-d-modelservice-decode -n "$LLMD_NAMESPACE_B" --timeout=1500s || {
+            echo "WARNING: Model B deployment not ready after 25 minutes"
+            echo "=== Pod status ==="
+            kubectl get pods -n "$LLMD_NAMESPACE_B"
+            echo "=== Deployment conditions ==="
+            kubectl get deployment ms-inference-scheduling-llm-d-modelservice-decode -n "$LLMD_NAMESPACE_B" -o jsonpath='{.status.conditions}' | jq . || true
+            echo "=== Recent events ==="
+            kubectl get events -n "$LLMD_NAMESPACE_B" --sort-by='.lastTimestamp' | tail -20
+          }
 
       - name: Verify multi-model deployment
         run: |
@@ -729,6 +802,117 @@ jobs:
           echo ""
           echo "=== WVA Controller ($WVA_NAMESPACE) ==="
           kubectl get pods -n "$WVA_NAMESPACE"
+
+      - name: Verify metrics pipeline
+        run: |
+          echo "=== Verifying metrics pipeline before running tests ==="
+          echo ""
+
+          # 1. Verify vLLM pods are serving /metrics endpoint
+          echo "--- Step 1: Checking vLLM /metrics endpoint ---"
+          for ns in "$LLMD_NAMESPACE" "$LLMD_NAMESPACE_B"; do
+            VLLM_POD=$(kubectl get pods -n "$ns" -l llm-d.ai/inference-serving=true -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "$VLLM_POD" ]; then
+              PORT="${VLLM_SVC_PORT:-8000}"
+              echo "  Checking vLLM pod $VLLM_POD in $ns (port $PORT)..."
+              METRICS=$(kubectl exec -n "$ns" "$VLLM_POD" -- curl -s "http://localhost:${PORT}/metrics" 2>/dev/null | head -5 || true)
+              if [ -n "$METRICS" ]; then
+                echo "  ✅ vLLM metrics endpoint responding in $ns"
+              else
+                echo "  ⚠️  vLLM metrics endpoint not responding in $ns (may still be loading)"
+              fi
+              # Show pod labels for debugging
+              echo "  Pod labels:"
+              kubectl get pod "$VLLM_POD" -n "$ns" -o jsonpath='{.metadata.labels}' | jq -r 'to_entries[] | "    \(.key)=\(.value)"' 2>/dev/null || true
+            else
+              echo "  ⚠️  No vLLM pods found with label llm-d.ai/inference-serving=true in $ns"
+              echo "  All pods in $ns:"
+              kubectl get pods -n "$ns" --show-labels 2>/dev/null || true
+            fi
+          done
+
+          # 1b. Verify vllm-service has endpoints (critical for ServiceMonitor scraping)
+          echo ""
+          echo "--- Step 1b: Checking vllm-service endpoints ---"
+          for ns in "$LLMD_NAMESPACE" "$LLMD_NAMESPACE_B"; do
+            SVC_NAME=$(kubectl get svc -n "$ns" -l app.kubernetes.io/name=workload-variant-autoscaler -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "$SVC_NAME" ]; then
+              ENDPOINTS=$(kubectl get endpoints "$SVC_NAME" -n "$ns" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
+              if [ -n "$ENDPOINTS" ]; then
+                echo "  ✅ Service $SVC_NAME in $ns has endpoints: $ENDPOINTS"
+              else
+                echo "  ❌ Service $SVC_NAME in $ns has NO endpoints — label selector mismatch!"
+                echo "  Service selector:"
+                kubectl get svc "$SVC_NAME" -n "$ns" -o jsonpath='{.spec.selector}' 2>/dev/null | jq . || true
+              fi
+            else
+              echo "  ⚠️  No vllm-service found in $ns"
+            fi
+          done
+
+          # 1c. Check PodMonitors (llm-d guide deploys these for direct pod scraping)
+          echo ""
+          echo "--- Step 1c: PodMonitor configuration ---"
+          for ns in "$LLMD_NAMESPACE" "$LLMD_NAMESPACE_B"; do
+            PM_COUNT=$(kubectl get podmonitor -n "$ns" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+            echo "  PodMonitors in $ns: $PM_COUNT"
+            kubectl get podmonitor -n "$ns" 2>/dev/null || true
+          done
+
+          # 2. Check WVA controller health
+          echo ""
+          echo "--- Step 2: WVA controller status ---"
+          kubectl get pods -n "$WVA_NAMESPACE" -l app.kubernetes.io/name=workload-variant-autoscaler
+          WVA_POD=$(kubectl get pods -n "$WVA_NAMESPACE" -l app.kubernetes.io/name=workload-variant-autoscaler -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+          if [ -n "$WVA_POD" ]; then
+            echo "  Recent WVA controller logs:"
+            kubectl logs "$WVA_POD" -n "$WVA_NAMESPACE" --tail=20 | grep -E "reconcil|metrics|error|saturation" || echo "  (no matching log lines)"
+          fi
+
+          # 3. Check VariantAutoscaling status
+          echo ""
+          echo "--- Step 3: VariantAutoscaling status ---"
+          kubectl get variantautoscaling -A -o wide 2>/dev/null || echo "  No VariantAutoscalings found"
+
+          # 4. Check ServiceMonitors exist
+          echo ""
+          echo "--- Step 4: ServiceMonitor configuration ---"
+          for ns in "$LLMD_NAMESPACE" "$LLMD_NAMESPACE_B" "$WVA_NAMESPACE"; do
+            SM_COUNT=$(kubectl get servicemonitor -n "$ns" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+            echo "  ServiceMonitors in $ns: $SM_COUNT"
+            kubectl get servicemonitor -n "$ns" 2>/dev/null || true
+          done
+
+          # 5. Wait for WVA to start processing metrics (up to 3 minutes)
+          echo ""
+          echo "--- Step 5: Waiting for WVA to detect metrics (up to 3 minutes) ---"
+          METRICS_READY=false
+          for i in $(seq 1 18); do
+            VA_STATUS=$(kubectl get variantautoscaling -n "$LLMD_NAMESPACE" -o jsonpath='{.items[0].status.desiredOptimizedAlloc.accelerator}' 2>/dev/null || true)
+            if [ -n "$VA_STATUS" ]; then
+              echo "  ✅ WVA optimization active — accelerator: $VA_STATUS"
+              METRICS_READY=true
+              break
+            fi
+            echo "  Attempt $i/18: WVA not yet optimizing, waiting 10s..."
+            sleep 10
+          done
+
+          if [ "$METRICS_READY" = "false" ]; then
+            echo "  ⚠️  WVA has not started optimizing after 3 minutes"
+            echo "  This may cause test timeouts — dumping diagnostics:"
+            echo ""
+            echo "  === WVA controller logs (last 50 lines) ==="
+            kubectl logs "$WVA_POD" -n "$WVA_NAMESPACE" --tail=50 2>/dev/null || true
+            echo ""
+            echo "  === HPA status ==="
+            kubectl get hpa -A 2>/dev/null || true
+            echo ""
+            echo "  Continuing to tests anyway (they have their own timeouts)..."
+          fi
+
+          echo ""
+          echo "=== Metrics pipeline verification complete ==="
 
       - name: Install Go dependencies
         run: go mod download

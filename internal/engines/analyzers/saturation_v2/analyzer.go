@@ -120,16 +120,16 @@ func (a *SaturationAnalyzer) Analyze(ctx context.Context, input interfaces.Analy
 
 	// Phase 5: Build result
 	result := &interfaces.AnalyzerResult{
-		AnalyzerName:     a.Name(),
-		ModelID:          input.ModelID,
-		Namespace:        input.Namespace,
-		AnalyzedAt:       time.Now(),
+		AnalyzerName:      a.Name(),
+		ModelID:           input.ModelID,
+		Namespace:         input.Namespace,
+		AnalyzedAt:        time.Now(),
 		VariantCapacities: variantCapacities,
-		TotalSupply:      totalSupply,
-		TotalDemand:      totalDemand,
-		Utilization:      utilization,
-		RequiredCapacity: requiredCapacity,
-		SpareCapacity:    spareCapacity,
+		TotalSupply:       totalSupply,
+		TotalDemand:       totalDemand,
+		Utilization:       utilization,
+		RequiredCapacity:  requiredCapacity,
+		SpareCapacity:     spareCapacity,
 	}
 
 	return result, nil

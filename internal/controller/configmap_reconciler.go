@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,7 +34,7 @@ import (
 // ConfigMapReconciler reconciles ConfigMaps to update the unified configuration.
 // Its sole responsibility is to keep the Config object synchronized with ConfigMap changes.
 type ConfigMapReconciler struct {
-	client.Client
+	client.Reader
 	Scheme    *runtime.Scheme
 	Config    *config.Config
 	Datastore datastore.Datastore
@@ -49,12 +48,6 @@ type ConfigMapReconciler struct {
 // Reconcile handles ConfigMap changes and updates the unified configuration.
 func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-
-	// Sanity check: Config should never be nil
-	if r.Config == nil {
-		logger.Error(nil, "Config is nil in ConfigMapReconciler - this should not happen")
-		return ctrl.Result{}, fmt.Errorf("config is nil")
-	}
 
 	// Fetch the ConfigMap
 	cm := &corev1.ConfigMap{}
@@ -85,8 +78,6 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Route to appropriate handler based on ConfigMap name
 	switch name {
-	case config.ConfigMapName():
-		r.handleMainConfigMap(ctx, cm, namespace, isGlobal)
 	case config.SaturationConfigMapName():
 		r.handleSaturationConfigMap(ctx, cm, namespace, isGlobal)
 	case config.DefaultScaleToZeroConfigMapName:
@@ -145,7 +136,7 @@ func (r *ConfigMapReconciler) shouldWatchNamespaceLocalConfigMap(ctx context.Con
 	}
 
 	// Multi-namespace mode: Check exclusion first (highest priority - overrides everything)
-	if isNamespaceExcluded(ctx, r.Client, namespace) {
+	if isNamespaceExcluded(ctx, r.Reader, namespace) {
 		return false
 	}
 
@@ -155,59 +146,7 @@ func (r *ConfigMapReconciler) shouldWatchNamespaceLocalConfigMap(ctx context.Con
 	}
 
 	// Check label-based opt-in (explicit)
-	return isNamespaceConfigEnabled(ctx, r.Client, namespace)
-}
-
-// handleMainConfigMap handles updates to the main ConfigMap (wva-variantautoscaling-config).
-// This ConfigMap is only supported globally, not per-namespace.
-// If immutable parameter changes are detected, they are rejected with a warning, but mutable
-// parameter updates are still applied.
-func (r *ConfigMapReconciler) handleMainConfigMap(ctx context.Context, cm *corev1.ConfigMap, namespace string, isGlobal bool) {
-	logger := log.FromContext(ctx)
-
-	if !isGlobal {
-		// Main ConfigMap is only supported globally
-		return
-	}
-
-	// Check for immutable parameter changes first
-	immutableChanges, err := config.DetectImmutableParameterChanges(r.Config, cm.Data)
-	immutableKeys := make(map[string]bool)
-	if err != nil {
-		// Immutable parameters detected - emit warning event and log error
-		logger.Error(err, "Attempted to change immutable parameters via ConfigMap",
-			"configmap", fmt.Sprintf("%s/%s", namespace, cm.GetName()),
-			"changes", immutableChanges)
-
-		// Build set of immutable keys to filter out when processing mutable parameters
-		for _, change := range immutableChanges {
-			immutableKeys[change.Key] = true
-		}
-
-		// Emit Kubernetes Warning event
-		if r.Recorder != nil {
-			var changeList []string
-			for _, change := range immutableChanges {
-				changeList = append(changeList, fmt.Sprintf("%s (old: %q, new: %q)", change.Parameter, change.OldValue, change.NewValue))
-			}
-			r.Recorder.Eventf(
-				cm,
-				corev1.EventTypeWarning,
-				"ImmutableConfigChangeRejected",
-				"ConfigMap %s/%s attempted to change immutable parameters that require controller restart: %s. These changes were rejected. Mutable parameter updates were still applied.",
-				namespace,
-				cm.GetName(),
-				fmt.Sprintf("%v", changeList),
-			)
-		}
-
-		// Continue processing mutable parameters (don't return early)
-		logger.Info("Rejected immutable parameter changes, continuing with mutable parameter updates",
-			"rejectedKeys", immutableKeys)
-	}
-
-	// Process mutable parameters (filter out immutable keys)
-	handleMutableParameters(ctx, r.Config, cm.Data, immutableKeys, logger)
+	return isNamespaceConfigEnabled(ctx, r.Reader, namespace)
 }
 
 // handleSaturationConfigMap handles updates to the saturation scaling ConfigMap.

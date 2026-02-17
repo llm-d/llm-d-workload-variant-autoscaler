@@ -181,7 +181,7 @@ var _ = Describe("VariantAutoscalingPredicate", func() {
 			Expect(os.Setenv("PROMETHEUS_BASE_URL", "http://prometheus:9090")).To(Succeed())
 			// Use Load() instead of NewTestConfig() to read from environment
 			var err error
-			cfg, err = config.Load(ctx, nil, k8sClient)
+			cfg, err = config.Load(nil, "")
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -363,7 +363,7 @@ var _ = Describe("VariantAutoscalingPredicate", func() {
 			Expect(os.Setenv("PROMETHEUS_BASE_URL", "http://prometheus:9090")).To(Succeed())
 			// Use Load() to read from environment
 			var err error
-			cfg, err = config.Load(ctx, nil, k8sClient)
+			cfg, err = config.Load(nil, "")
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Creating watched namespace with exclusion annotation")
