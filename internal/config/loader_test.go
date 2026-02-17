@@ -1,31 +1,34 @@
 package config
 
 import (
-	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	flag "github.com/spf13/pflag"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	interfaces "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
-	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils"
 )
 
-func TestLoad_Defaults(t *testing.T) {
-	// Setup: No flags, no env, no ConfigMap
-	ctx := context.Background()
-	k8sClient := fake.NewClientBuilder().Build()
+// writeTestConfigFile writes a YAML config file to a temp directory and returns its path.
+func writeTestConfigFile(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+	return path
+}
 
+func TestLoad_Defaults(t *testing.T) {
+	// Setup: No flags, no env, no config file
 	// Set required Prometheus env var
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
 	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
 
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, "")
 	if err != nil {
 		t.Fatalf("Load() failed with defaults: %v", err)
 	}
@@ -46,9 +49,7 @@ func TestLoad_Defaults(t *testing.T) {
 }
 
 func TestLoad_FlagsPrecedence(t *testing.T) {
-	ctx := context.Background()
-
-	// Set env var and ConfigMap (should be overridden by flags)
+	// Set env var (should be overridden by flags)
 	_ = os.Setenv("METRICS_BIND_ADDRESS", "env-value")
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
 	defer func() {
@@ -56,23 +57,15 @@ func TestLoad_FlagsPrecedence(t *testing.T) {
 		_ = os.Unsetenv("PROMETHEUS_BASE_URL")
 	}()
 
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultConfigMapName,
-			Namespace: "workload-variant-autoscaler-system",
-		},
-		Data: map[string]string{
-			"METRICS_BIND_ADDRESS": "cm-value",
-		},
-	}
-	k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
+	// Config file value (should be overridden by flags)
+	configFile := writeTestConfigFile(t, `METRICS_BIND_ADDRESS: "file-value"`)
 
 	// Create a flagset with metrics-bind-address explicitly set
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.String("metrics-bind-address", "0", "")
 	_ = fs.Set("metrics-bind-address", "flag-value")
 
-	cfg, err := Load(ctx, fs, k8sClient)
+	cfg, err := Load(fs, configFile)
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -84,8 +77,6 @@ func TestLoad_FlagsPrecedence(t *testing.T) {
 }
 
 func TestLoad_EnvPrecedence(t *testing.T) {
-	ctx := context.Background()
-
 	_ = os.Setenv("METRICS_BIND_ADDRESS", "env-value")
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
 	defer func() {
@@ -93,62 +84,40 @@ func TestLoad_EnvPrecedence(t *testing.T) {
 		_ = os.Unsetenv("PROMETHEUS_BASE_URL")
 	}()
 
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultConfigMapName,
-			Namespace: "workload-variant-autoscaler-system",
-		},
-		Data: map[string]string{
-			"METRICS_BIND_ADDRESS": "cm-value",
-		},
-	}
-	k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
+	// Config file value (should be overridden by env)
+	configFile := writeTestConfigFile(t, `METRICS_BIND_ADDRESS: "file-value"`)
 
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, configFile)
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	// Env should take precedence over ConfigMap
+	// Env should take precedence over config file
 	if cfg.MetricsAddr() != "env-value" {
 		t.Errorf("Expected MetricsAddr 'env-value' (from env), got %q", cfg.MetricsAddr())
 	}
 }
 
-func TestLoad_ConfigMapPrecedence(t *testing.T) {
-	ctx := context.Background()
-
+func TestLoad_FilePrecedence(t *testing.T) {
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
 	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
 
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultConfigMapName,
-			Namespace: "workload-variant-autoscaler-system",
-		},
-		Data: map[string]string{
-			"METRICS_BIND_ADDRESS": "cm-value",
-		},
-	}
-	k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
+	configFile := writeTestConfigFile(t, `METRICS_BIND_ADDRESS: "file-value"`)
 
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, configFile)
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	// ConfigMap should be used
-	if cfg.MetricsAddr() != "cm-value" {
-		t.Errorf("Expected MetricsAddr 'cm-value' (from ConfigMap), got %q", cfg.MetricsAddr())
+	// Config file should be used
+	if cfg.MetricsAddr() != "file-value" {
+		t.Errorf("Expected MetricsAddr 'file-value' (from file), got %q", cfg.MetricsAddr())
 	}
 }
 
 func TestLoad_PrometheusConfigRequired(t *testing.T) {
-	ctx := context.Background()
-	k8sClient := fake.NewClientBuilder().Build()
-
 	// No Prometheus config set
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, "")
 	if err == nil {
 		t.Fatal("Expected Load() to fail when Prometheus config is missing, but it succeeded")
 	}
@@ -158,13 +127,10 @@ func TestLoad_PrometheusConfigRequired(t *testing.T) {
 }
 
 func TestLoad_PrometheusConfigFromEnv(t *testing.T) {
-	ctx := context.Background()
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus-env:9090")
 	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
 
-	k8sClient := fake.NewClientBuilder().Build()
-
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -177,21 +143,10 @@ func TestLoad_PrometheusConfigFromEnv(t *testing.T) {
 	}
 }
 
-func TestLoad_PrometheusConfigFromConfigMap(t *testing.T) {
-	ctx := context.Background()
+func TestLoad_PrometheusConfigFromFile(t *testing.T) {
+	configFile := writeTestConfigFile(t, `PROMETHEUS_BASE_URL: "https://prometheus-file:9090"`)
 
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultConfigMapName,
-			Namespace: "workload-variant-autoscaler-system",
-		},
-		Data: map[string]string{
-			"PROMETHEUS_BASE_URL": "https://prometheus-cm:9090",
-		},
-	}
-	k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
-
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, configFile)
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -199,28 +154,18 @@ func TestLoad_PrometheusConfigFromConfigMap(t *testing.T) {
 	if cfg.PrometheusBaseURL() == "" {
 		t.Fatal("Expected Prometheus config to be loaded")
 	}
-	if cfg.PrometheusBaseURL() != "https://prometheus-cm:9090" {
-		t.Errorf("Expected Prometheus BaseURL from ConfigMap, got %q", cfg.PrometheusBaseURL())
+	if cfg.PrometheusBaseURL() != "https://prometheus-file:9090" {
+		t.Errorf("Expected Prometheus BaseURL from file, got %q", cfg.PrometheusBaseURL())
 	}
 }
 
-func TestLoad_DynamicConfig_OptimizationInterval(t *testing.T) {
-	ctx := context.Background()
+func TestLoad_OptimizationIntervalFromFile(t *testing.T) {
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
 	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
 
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultConfigMapName,
-			Namespace: "workload-variant-autoscaler-system",
-		},
-		Data: map[string]string{
-			"GLOBAL_OPT_INTERVAL": "30s",
-		},
-	}
-	k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
+	configFile := writeTestConfigFile(t, `GLOBAL_OPT_INTERVAL: "30s"`)
 
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, configFile)
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -230,184 +175,15 @@ func TestLoad_DynamicConfig_OptimizationInterval(t *testing.T) {
 	}
 }
 
-func TestLoad_DynamicConfig_InvalidOptimizationInterval(t *testing.T) {
-	ctx := context.Background()
-	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
-	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
+func TestLoad_FeatureFlagsFromFile(t *testing.T) {
+	configFile := writeTestConfigFile(t, `
+PROMETHEUS_BASE_URL: "https://prometheus:9090"
+WVA_SCALE_TO_ZERO: "true"
+WVA_LIMITED_MODE: "false"
+SCALE_FROM_ZERO_ENGINE_MAX_CONCURRENCY: "5"
+`)
 
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultConfigMapName,
-			Namespace: "workload-variant-autoscaler-system",
-		},
-		Data: map[string]string{
-			"GLOBAL_OPT_INTERVAL": "invalid-duration",
-		},
-	}
-	k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
-
-	cfg, err := Load(ctx, nil, k8sClient)
-	if err != nil {
-		t.Fatalf("Load() should not fail on invalid duration, should use default: %v", err)
-	}
-
-	// Should fall back to default
-	if cfg.OptimizationInterval() != 60*time.Second {
-		t.Errorf("Expected OptimizationInterval to fall back to default 60s, got %v", cfg.OptimizationInterval())
-	}
-}
-
-func TestLoad_DynamicConfig_SaturationConfig(t *testing.T) {
-	ctx := context.Background()
-	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
-	// Ensure namespace matches what SystemNamespace() returns
-	_ = os.Setenv("POD_NAMESPACE", "workload-variant-autoscaler-system")
-	defer func() {
-		_ = os.Unsetenv("PROMETHEUS_BASE_URL")
-		_ = os.Unsetenv("POD_NAMESPACE")
-	}()
-
-	saturationCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "wva-saturation-scaling-config",
-			Namespace: "workload-variant-autoscaler-system",
-		},
-		Data: map[string]string{
-			"default": `kvCacheThreshold: 0.8
-queueLengthThreshold: 5
-kvSpareTrigger: 0.1
-queueSpareTrigger: 3`,
-		},
-	}
-	k8sClient := fake.NewClientBuilder().WithObjects(saturationCM).Build()
-
-	// Verify ConfigMap can be retrieved directly
-	testCM := &corev1.ConfigMap{}
-	err := k8sClient.Get(ctx, client.ObjectKey{
-		Name:      "wva-saturation-scaling-config",
-		Namespace: "workload-variant-autoscaler-system",
-	}, testCM)
-	if err != nil {
-		t.Fatalf("Failed to retrieve ConfigMap directly: %v", err)
-	}
-
-	// Also test GetConfigMapWithBackoff directly to verify it works
-	testCM2 := &corev1.ConfigMap{}
-	err2 := utils.GetConfigMapWithBackoff(ctx, k8sClient, "wva-saturation-scaling-config", "workload-variant-autoscaler-system", testCM2)
-	if err2 != nil {
-		t.Logf("GetConfigMapWithBackoff failed: %v (this might be expected in test)", err2)
-	} else {
-		t.Logf("GetConfigMapWithBackoff succeeded, found %d keys", len(testCM2.Data))
-	}
-
-	cfg, err := Load(ctx, nil, k8sClient)
-	if err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	satConfig := cfg.SaturationConfig()
-	if len(satConfig) != 1 {
-		// Debug: Check if ConfigMap was found but not parsed
-		// The issue might be that GetConfigMapWithBackoff works but the loader
-		// uses a different namespace or the ConfigMap isn't being found during Load()
-		t.Logf("Saturation config has %d entries (expected 1)", len(satConfig))
-		t.Logf("ConfigMap name should be 'wva-saturation-scaling-config', namespace 'workload-variant-autoscaler-system'")
-		t.Fatalf("Expected 1 saturation config entry, got %d", len(satConfig))
-	}
-
-	defaultConfig, ok := satConfig["default"]
-	if !ok {
-		t.Fatal("Expected 'default' saturation config entry")
-	}
-	if defaultConfig.KvCacheThreshold != 0.8 {
-		t.Errorf("Expected KvCacheThreshold 0.8, got %f", defaultConfig.KvCacheThreshold)
-	}
-}
-
-func TestLoad_DynamicConfig_InvalidSaturationConfig(t *testing.T) {
-	ctx := context.Background()
-	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
-	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
-
-	saturationCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "wva-saturation-scaling-config",
-			Namespace: "workload-variant-autoscaler-system",
-		},
-		Data: map[string]string{
-			"default": `kvCacheThreshold: 1.5  # Invalid: > 1.0
-queueLengthThreshold: 5
-kvSpareTrigger: 0.1
-queueSpareTrigger: 3`,
-		},
-	}
-	k8sClient := fake.NewClientBuilder().WithObjects(saturationCM).Build()
-
-	cfg, err := Load(ctx, nil, k8sClient)
-	if err != nil {
-		t.Fatalf("Load() should not fail on invalid saturation config, should skip it: %v", err)
-	}
-
-	// Invalid entry should be skipped
-	satConfig := cfg.SaturationConfig()
-	if len(satConfig) != 0 {
-		t.Errorf("Expected invalid saturation config to be skipped, but got %d entries", len(satConfig))
-	}
-}
-
-func TestLoad_DynamicConfig_ScaleToZeroConfig(t *testing.T) {
-	ctx := context.Background()
-	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
-	// Ensure namespace matches what SystemNamespace() returns
-	_ = os.Setenv("POD_NAMESPACE", "workload-variant-autoscaler-system")
-	defer func() {
-		_ = os.Unsetenv("PROMETHEUS_BASE_URL")
-		_ = os.Unsetenv("POD_NAMESPACE")
-	}()
-
-	scaleToZeroCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultScaleToZeroConfigMapName,
-			Namespace: "workload-variant-autoscaler-system",
-		},
-		Data: map[string]string{
-			"model1": `model_id: model1
-enable_scale_to_zero: true
-retention_period: 5m`,
-		},
-	}
-	k8sClient := fake.NewClientBuilder().WithObjects(scaleToZeroCM).Build()
-
-	cfg, err := Load(ctx, nil, k8sClient)
-	if err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	scaleToZeroConfig := cfg.ScaleToZeroConfig()
-	if len(scaleToZeroConfig) == 0 {
-		t.Error("Expected scale-to-zero config to be loaded")
-	}
-}
-
-func TestLoad_FeatureFlags(t *testing.T) {
-	ctx := context.Background()
-	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
-	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
-
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultConfigMapName,
-			Namespace: "workload-variant-autoscaler-system",
-		},
-		Data: map[string]string{
-			"WVA_SCALE_TO_ZERO":                      "true",
-			"WVA_LIMITED_MODE":                       "false",
-			"SCALE_FROM_ZERO_ENGINE_MAX_CONCURRENCY": "5",
-		},
-	}
-	k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
-
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, configFile)
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -423,24 +199,13 @@ func TestLoad_FeatureFlags(t *testing.T) {
 	}
 }
 
-func TestLoad_PrometheusCacheConfig(t *testing.T) {
-	ctx := context.Background()
-	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
-	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
+func TestLoad_PrometheusCacheConfigFromFile(t *testing.T) {
+	configFile := writeTestConfigFile(t, `
+PROMETHEUS_BASE_URL: "https://prometheus:9090"
+PROMETHEUS_METRICS_CACHE_TTL: "60s"
+`)
 
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultConfigMapName,
-			Namespace: "workload-variant-autoscaler-system",
-		},
-		Data: map[string]string{
-			"PROMETHEUS_METRICS_CACHE_ENABLED": "false",
-			"PROMETHEUS_METRICS_CACHE_TTL":     "60s",
-		},
-	}
-	k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
-
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, configFile)
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -449,22 +214,16 @@ func TestLoad_PrometheusCacheConfig(t *testing.T) {
 	if cacheConfig == nil {
 		t.Fatal("Expected Prometheus cache config to be loaded")
 	}
-	if cacheConfig.Enabled {
-		t.Error("Expected cache to be disabled from ConfigMap")
-	}
 	if cacheConfig.TTL != 60*time.Second {
 		t.Errorf("Expected cache TTL 60s, got %v", cacheConfig.TTL)
 	}
 }
 
 func TestConfig_ThreadSafety(t *testing.T) {
-	ctx := context.Background()
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
 	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
 
-	k8sClient := fake.NewClientBuilder().Build()
-
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -488,19 +247,13 @@ func TestConfig_ThreadSafety(t *testing.T) {
 }
 
 func TestConfig_UpdateDynamicConfig(t *testing.T) {
-	ctx := context.Background()
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
 	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
 
-	k8sClient := fake.NewClientBuilder().Build()
-
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
-
-	// Update optimization interval
-	cfg.UpdateOptimizationInterval(30 * time.Second)
 
 	// Update saturation config
 	satConfig := map[string]interfaces.SaturationScalingConfig{
@@ -513,11 +266,6 @@ func TestConfig_UpdateDynamicConfig(t *testing.T) {
 	}
 	cfg.UpdateSaturationConfig(satConfig)
 
-	// Verify update
-	if cfg.OptimizationInterval() != 30*time.Second {
-		t.Errorf("Expected updated OptimizationInterval 30s, got %v", cfg.OptimizationInterval())
-	}
-
 	updatedSatConfig := cfg.SaturationConfig()
 	if len(updatedSatConfig) != 1 {
 		t.Fatalf("Expected 1 saturation config entry after update, got %d", len(updatedSatConfig))
@@ -525,16 +273,10 @@ func TestConfig_UpdateDynamicConfig(t *testing.T) {
 }
 
 func TestLoad_Validation_OptimizationInterval(t *testing.T) {
-	// This test verifies that validation catches invalid optimization intervals
-	// However, since we parse and validate in loadDynamicConfig, invalid values
-	// fall back to defaults, so we test that behavior instead
-	ctx := context.Background()
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
 	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
 
-	k8sClient := fake.NewClientBuilder().Build()
-
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -545,16 +287,13 @@ func TestLoad_Validation_OptimizationInterval(t *testing.T) {
 	}
 }
 
-func TestLoad_NoConfigMap(t *testing.T) {
-	ctx := context.Background()
+func TestLoad_NoConfigFile(t *testing.T) {
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
 	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
 
-	k8sClient := fake.NewClientBuilder().Build() // No ConfigMaps
-
-	cfg, err := Load(ctx, nil, k8sClient)
+	cfg, err := Load(nil, "")
 	if err != nil {
-		t.Fatalf("Load() should succeed with defaults when ConfigMap is missing: %v", err)
+		t.Fatalf("Load() should succeed with defaults when no config file: %v", err)
 	}
 
 	// Should use defaults
@@ -563,289 +302,184 @@ func TestLoad_NoConfigMap(t *testing.T) {
 	}
 }
 
-// TestLoad_BoolPrecedence tests that boolean flag precedence is correct: flag > env > cm
-func TestLoad_BoolPrecedence(t *testing.T) {
-	ctx := context.Background()
+func TestLoad_MissingConfigFile(t *testing.T) {
+	// Pointing to a non-existent file should fail
+	_, err := Load(nil, "/nonexistent/path/config.yaml")
+	if err == nil {
+		t.Fatal("Expected Load() to fail when config file doesn't exist")
+	}
+}
 
+func TestLoad_ConfigFromFile(t *testing.T) {
+	configFile := writeTestConfigFile(t, `
+PROMETHEUS_BASE_URL: "https://prometheus-file:9090"
+GLOBAL_OPT_INTERVAL: "120s"
+WVA_SCALE_TO_ZERO: "true"
+EPP_METRIC_READER_BEARER_TOKEN: "test-token"
+PROMETHEUS_TLS_INSECURE_SKIP_VERIFY: "true"
+PROMETHEUS_CA_CERT_PATH: "/custom/ca.crt"
+`)
+
+	cfg, err := Load(nil, configFile)
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	if cfg.PrometheusBaseURL() != "https://prometheus-file:9090" {
+		t.Errorf("Expected Prometheus BaseURL from file, got %q", cfg.PrometheusBaseURL())
+	}
+	if cfg.OptimizationInterval() != 120*time.Second {
+		t.Errorf("Expected OptimizationInterval 120s, got %v", cfg.OptimizationInterval())
+	}
+	if !cfg.ScaleToZeroEnabled() {
+		t.Error("Expected ScaleToZeroEnabled to be true from file")
+	}
+	if cfg.EPPMetricReaderBearerToken() != "test-token" {
+		t.Errorf("Expected EPP bearer token 'test-token', got %q", cfg.EPPMetricReaderBearerToken())
+	}
+	if !cfg.PrometheusInsecureSkipVerify() {
+		t.Error("Expected PrometheusInsecureSkipVerify to be true from file")
+	}
+	if cfg.PrometheusCACertPath() != "/custom/ca.crt" {
+		t.Errorf("Expected Prometheus CA cert path '/custom/ca.crt', got %q", cfg.PrometheusCACertPath())
+	}
+}
+
+// TestLoad_BoolPrecedence tests that boolean flag precedence is correct: flag > env > file
+func TestLoad_BoolPrecedence(t *testing.T) {
 	// Set required Prometheus env var
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
 	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
 
-	t.Run("flag=false should take precedence over cm=true", func(t *testing.T) {
-		// Create ConfigMap with LEADER_ELECT=true
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      DefaultConfigMapName,
-				Namespace: DefaultNamespace,
-			},
-			Data: map[string]string{
-				"LEADER_ELECT": "true",
-			},
-		}
-		k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
+	t.Run("flag=false should take precedence over file=true", func(t *testing.T) {
+		configFile := writeTestConfigFile(t, `LEADER_ELECT: "true"`)
 
 		// Flag explicitly set to false
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
 		fs.Bool("leader-elect", false, "")
 		_ = fs.Set("leader-elect", "false")
 
-		cfg, err := Load(ctx, fs, k8sClient)
+		cfg, err := Load(fs, configFile)
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
 
-		// Flag should take precedence (false), not ConfigMap (true)
 		if cfg.EnableLeaderElection() {
-			t.Errorf("Expected EnableLeaderElection=false (from flag), got true (ConfigMap was incorrectly used)")
+			t.Errorf("Expected EnableLeaderElection=false (from flag), got true")
 		}
 	})
 
-	t.Run("flag=true should take precedence over cm=false", func(t *testing.T) {
-		// Create ConfigMap with LEADER_ELECT=false
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      DefaultConfigMapName,
-				Namespace: DefaultNamespace,
-			},
-			Data: map[string]string{
-				"LEADER_ELECT": "false",
-			},
-		}
-		k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
+	t.Run("flag=true should take precedence over file=false", func(t *testing.T) {
+		configFile := writeTestConfigFile(t, `LEADER_ELECT: "false"`)
 
 		// Flag explicitly set to true
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
 		fs.Bool("leader-elect", false, "")
 		_ = fs.Set("leader-elect", "true")
 
-		cfg, err := Load(ctx, fs, k8sClient)
+		cfg, err := Load(fs, configFile)
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
 
-		// Flag should take precedence (true), not ConfigMap (false)
 		if !cfg.EnableLeaderElection() {
-			t.Errorf("Expected EnableLeaderElection=true (from flag), got false (ConfigMap was incorrectly used)")
+			t.Errorf("Expected EnableLeaderElection=true (from flag), got false")
 		}
 	})
 
-	t.Run("env should take precedence over cm when flag is unset", func(t *testing.T) {
-		// Create ConfigMap with LEADER_ELECT=false
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      DefaultConfigMapName,
-				Namespace: DefaultNamespace,
-			},
-			Data: map[string]string{
-				"LEADER_ELECT": "false",
-			},
-		}
-		k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
+	t.Run("env should take precedence over file when flag is unset", func(t *testing.T) {
+		configFile := writeTestConfigFile(t, `LEADER_ELECT: "false"`)
 
-		// Set env var to true
 		_ = os.Setenv("LEADER_ELECT", "true")
 		defer func() { _ = os.Unsetenv("LEADER_ELECT") }()
 
-		cfg, err := Load(ctx, nil, k8sClient)
+		cfg, err := Load(nil, configFile)
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
 
-		// Env should take precedence (true), not ConfigMap (false)
 		if !cfg.EnableLeaderElection() {
-			t.Errorf("Expected EnableLeaderElection=true (from env), got false (ConfigMap was incorrectly used)")
+			t.Errorf("Expected EnableLeaderElection=true (from env), got false")
 		}
 	})
 
-	t.Run("cm should be used when flag and env are unset", func(t *testing.T) {
-		// Create ConfigMap with LEADER_ELECT=true
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      DefaultConfigMapName,
-				Namespace: DefaultNamespace,
-			},
-			Data: map[string]string{
-				"LEADER_ELECT": "true",
-			},
-		}
-		k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
+	t.Run("file should be used when flag and env are unset", func(t *testing.T) {
+		configFile := writeTestConfigFile(t, `LEADER_ELECT: "true"`)
 
-		// Ensure env is not set
 		_ = os.Unsetenv("LEADER_ELECT")
 
-		cfg, err := Load(ctx, nil, k8sClient)
+		cfg, err := Load(nil, configFile)
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
 
-		// ConfigMap should be used (true)
 		if !cfg.EnableLeaderElection() {
-			t.Errorf("Expected EnableLeaderElection=true (from ConfigMap), got false")
+			t.Errorf("Expected EnableLeaderElection=true (from file), got false")
 		}
 	})
 }
 
-// TestLoad_DurationPrecedence tests that duration flag precedence is correct: flag > env > cm > defaults
+// TestLoad_DurationPrecedence tests that duration flag precedence is correct: flag > env > file > defaults
 func TestLoad_DurationPrecedence(t *testing.T) {
-	ctx := context.Background()
-
-	// Set required Prometheus env var
 	_ = os.Setenv("PROMETHEUS_BASE_URL", "https://prometheus:9090")
 	defer func() { _ = os.Unsetenv("PROMETHEUS_BASE_URL") }()
 
-	t.Run("flag=0 should take precedence over cm=30s", func(t *testing.T) {
-		// Create ConfigMap with LEADER_ELECTION_LEASE_DURATION=30s
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      DefaultConfigMapName,
-				Namespace: DefaultNamespace,
-			},
-			Data: map[string]string{
-				"LEADER_ELECTION_LEASE_DURATION": "30s",
-			},
-		}
-		k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
+	t.Run("flag should take precedence over file", func(t *testing.T) {
+		configFile := writeTestConfigFile(t, `LEADER_ELECTION_LEASE_DURATION: "30s"`)
 
-		// Flag explicitly set to 0
-		fs := flag.NewFlagSet("test", flag.ContinueOnError)
-		fs.Duration("leader-election-lease-duration", 60*time.Second, "")
-		_ = fs.Set("leader-election-lease-duration", "0s")
-
-		cfg, err := Load(ctx, fs, k8sClient)
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-
-		// Flag should take precedence (0), not ConfigMap (30s)
-		if cfg.LeaseDuration() != 0 {
-			t.Errorf("Expected LeaseDuration=0 (from flag), got %v (ConfigMap was incorrectly used)", cfg.LeaseDuration())
-		}
-	})
-
-	t.Run("flag=45s should take precedence over cm=30s", func(t *testing.T) {
-		// Create ConfigMap with LEADER_ELECTION_LEASE_DURATION=30s
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      DefaultConfigMapName,
-				Namespace: DefaultNamespace,
-			},
-			Data: map[string]string{
-				"LEADER_ELECTION_LEASE_DURATION": "30s",
-			},
-		}
-		k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
-
-		// Flag explicitly set to 45s
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
 		fs.Duration("leader-election-lease-duration", 60*time.Second, "")
 		_ = fs.Set("leader-election-lease-duration", "45s")
 
-		cfg, err := Load(ctx, fs, k8sClient)
+		cfg, err := Load(fs, configFile)
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
 
-		// Flag should take precedence (45s), not ConfigMap (30s)
 		if cfg.LeaseDuration() != 45*time.Second {
-			t.Errorf("Expected LeaseDuration=45s (from flag), got %v (ConfigMap was incorrectly used)", cfg.LeaseDuration())
+			t.Errorf("Expected LeaseDuration=45s (from flag), got %v", cfg.LeaseDuration())
 		}
 	})
 
-	t.Run("env should take precedence over cm when flag is unset", func(t *testing.T) {
-		// Create ConfigMap with LEADER_ELECTION_LEASE_DURATION=30s
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      DefaultConfigMapName,
-				Namespace: DefaultNamespace,
-			},
-			Data: map[string]string{
-				"LEADER_ELECTION_LEASE_DURATION": "30s",
-			},
-		}
-		k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
+	t.Run("env should take precedence over file when flag is unset", func(t *testing.T) {
+		configFile := writeTestConfigFile(t, `LEADER_ELECTION_LEASE_DURATION: "30s"`)
 
-		// Set env var to 45s
 		_ = os.Setenv("LEADER_ELECTION_LEASE_DURATION", "45s")
 		defer func() { _ = os.Unsetenv("LEADER_ELECTION_LEASE_DURATION") }()
 
-		cfg, err := Load(ctx, nil, k8sClient)
+		cfg, err := Load(nil, configFile)
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
 
-		// Env should take precedence (45s), not ConfigMap (30s)
 		if cfg.LeaseDuration() != 45*time.Second {
-			t.Errorf("Expected LeaseDuration=45s (from env), got %v (ConfigMap was incorrectly used)", cfg.LeaseDuration())
+			t.Errorf("Expected LeaseDuration=45s (from env), got %v", cfg.LeaseDuration())
 		}
 	})
 
-	t.Run("cm should be used when flag and env are unset", func(t *testing.T) {
-		// Create ConfigMap with LEADER_ELECTION_LEASE_DURATION=30s
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      DefaultConfigMapName,
-				Namespace: DefaultNamespace,
-			},
-			Data: map[string]string{
-				"LEADER_ELECTION_LEASE_DURATION": "30s",
-			},
-		}
-		k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
+	t.Run("file should be used when flag and env are unset", func(t *testing.T) {
+		configFile := writeTestConfigFile(t, `LEADER_ELECTION_LEASE_DURATION: "30s"`)
 
-		// Ensure env is not set
 		_ = os.Unsetenv("LEADER_ELECTION_LEASE_DURATION")
 
-		cfg, err := Load(ctx, nil, k8sClient)
+		cfg, err := Load(nil, configFile)
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
 
-		// ConfigMap should be used (30s)
 		if cfg.LeaseDuration() != 30*time.Second {
-			t.Errorf("Expected LeaseDuration=30s (from ConfigMap), got %v", cfg.LeaseDuration())
+			t.Errorf("Expected LeaseDuration=30s (from file), got %v", cfg.LeaseDuration())
 		}
 	})
 
-	t.Run("cm=0 should be respected when flag and env are unset", func(t *testing.T) {
-		// Create ConfigMap with LEADER_ELECTION_LEASE_DURATION=0s (explicit zero)
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      DefaultConfigMapName,
-				Namespace: DefaultNamespace,
-			},
-			Data: map[string]string{
-				"LEADER_ELECTION_LEASE_DURATION": "0s",
-			},
-		}
-		k8sClient := fake.NewClientBuilder().WithObjects(cm).Build()
-
-		// Ensure env is not set
+	t.Run("default should be used when flag, env, and file are all unset", func(t *testing.T) {
 		_ = os.Unsetenv("LEADER_ELECTION_LEASE_DURATION")
 
-		cfg, err := Load(ctx, nil, k8sClient)
+		cfg, err := Load(nil, "")
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
 
-		// ConfigMap value of 0 should be used (not default)
-		if cfg.LeaseDuration() != 0 {
-			t.Errorf("Expected LeaseDuration=0 (from ConfigMap), got %v (default was incorrectly used)", cfg.LeaseDuration())
-		}
-	})
-
-	t.Run("default should be used when flag, env, and cm are all unset", func(t *testing.T) {
-		// No ConfigMap
-		k8sClient := fake.NewClientBuilder().Build()
-
-		// Ensure env is not set
-		_ = os.Unsetenv("LEADER_ELECTION_LEASE_DURATION")
-
-		cfg, err := Load(ctx, nil, k8sClient)
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-
-		// Default should be used (60s from loadStaticConfig defaults)
 		if cfg.LeaseDuration() != 60*time.Second {
 			t.Errorf("Expected LeaseDuration=60s (from default), got %v", cfg.LeaseDuration())
 		}

@@ -38,8 +38,8 @@ func defaultVLLMEngineParams() VLLMEngineParams {
 		KvCacheDtype:          "auto",
 		TensorParallelSize:    1,
 		MaxNumSeqs:            256,
-		IsV1Engine:            true,  // default since vLLM v0.8
-		ChunkedPrefillEnabled: true,  // V1 engine uses chunked prefill by default
+		IsV1Engine:            true, // default since vLLM v0.8
+		ChunkedPrefillEnabled: true, // V1 engine uses chunked prefill by default
 	}
 }
 

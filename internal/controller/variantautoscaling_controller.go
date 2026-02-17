@@ -151,7 +151,7 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 				llmdVariantAutoscalingV1alpha1.ReasonTargetNotFound,
 				fmt.Sprintf("Scale target Deployment %s not found", scaleTargetName))
 
-			if err := r.Status().Patch(ctx, &va, client.MergeFrom(originalVA)); err != nil {
+			if err := r.Status().Patch(ctx, &va, client.MergeFrom(fullDesiredAllocPatchBase(originalVA, &va))); err != nil {
 				logger.Error(err, "Failed to update VariantAutoscaling status")
 				return ctrl.Result{}, err
 			}
@@ -218,9 +218,12 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 		logger.Info("No decision found in cache for VA", "va", va.Name, "namespace", va.Namespace)
 	}
 
-	// Update Status if we have changes (Conditions or OptimizedAlloc)
-	// We use Patch to only send changed fields, avoiding validation errors on unchanged fields
-	if err := r.Status().Patch(ctx, &va, client.MergeFrom(originalVA)); err != nil {
+	// Patch status — use fullDesiredAllocPatchBase to ensure the complete
+	// desiredOptimizedAlloc object is always included in the merge patch.
+	// Without this, MergeFrom only includes changed fields within the struct,
+	// and the CRD validates the partial patch — rejecting it when required
+	// fields (numReplicas, accelerator) are absent. See: #731
+	if err := r.Status().Patch(ctx, &va, client.MergeFrom(fullDesiredAllocPatchBase(originalVA, &va))); err != nil {
 		logger.Error(err, "Failed to update VariantAutoscaling status",
 			"name", va.Name)
 		return ctrl.Result{}, err
@@ -229,6 +232,23 @@ func (r *VariantAutoscalingReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// END: Per VA logic
 
 	return ctrl.Result{}, nil
+}
+
+// fullDesiredAllocPatchBase returns a patch base that forces the full
+// desiredOptimizedAlloc object into the JSON merge patch. Without this,
+// MergeFrom only includes changed fields within nested structs, and the
+// CRD validates the partial patch — rejecting it when required fields
+// (numReplicas, accelerator) are absent from the partial object.
+// When desiredOptimizedAlloc hasn't been set yet (accelerator is empty),
+// the base is left unchanged so the zero-valued struct is not included.
+func fullDesiredAllocPatchBase(originalVA *llmdVariantAutoscalingV1alpha1.VariantAutoscaling, va *llmdVariantAutoscalingV1alpha1.VariantAutoscaling) *llmdVariantAutoscalingV1alpha1.VariantAutoscaling {
+	base := originalVA.DeepCopy()
+	if va.Status.DesiredOptimizedAlloc.Accelerator != "" {
+		// Zero out the base so the entire modified desiredOptimizedAlloc
+		// appears as a change and is fully included in the merge patch.
+		base.Status.DesiredOptimizedAlloc = llmdVariantAutoscalingV1alpha1.OptimizedAlloc{}
+	}
+	return base
 }
 
 // handleDeploymentEvent maps Deployment events to VA reconcile requests.

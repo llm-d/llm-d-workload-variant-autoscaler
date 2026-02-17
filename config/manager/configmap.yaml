@@ -13,7 +13,7 @@ data:
   # - OpenShift: "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
   # - KIND cluster: "https://kube-prometheus-stack-prometheus.workload-variant-autoscaler-monitoring.svc.cluster.local:9090"
   PROMETHEUS_BASE_URL: "https://kube-prometheus-stack-prometheus.workload-variant-autoscaler-monitoring.svc.cluster.local:9090"
-  
+
   # TLS Configuration (TLS is always enabled for HTTPS-only support)
   # PROMETHEUS_TLS_INSECURE_SKIP_VERIFY: "true"  # Skip certificate verification (development/testing only)
   # PROMETHEUS_CA_CERT_PATH: "/path/to/ca.crt"   # CA certificate for server validation
@@ -21,11 +21,11 @@ data:
   # PROMETHEUS_CLIENT_KEY_PATH: "/path/to/client.key"   # Client private key for mutual TLS
   # PROMETHEUS_SERVER_NAME: "prometheus.example.com"    # Expected server name for SNI
   PROMETHEUS_TLS_INSECURE_SKIP_VERIFY: "true"
-  
+
   # Authentication Configuration (BearerToken takes precedence over TokenPath)
   # PROMETHEUS_BEARER_TOKEN: "your-token-here"           # Direct bearer token (development/testing)
   # PROMETHEUS_TOKEN_PATH: "/path/to/token/file"        # Path to bearer token file (production with mounted secrets)
-  
+
   # Optimization configuration
   GLOBAL_OPT_INTERVAL: "60s"
 
@@ -35,9 +35,6 @@ data:
 
   # Prometheus metrics cache configuration
   # Each collector (Prometheus, EPP, etc.) has its own cache configuration
-  # Enable/disable Prometheus metrics caching (default: "true")
-  # Adding ability to disable flag for debugging purposes and testing, coule be removed in the future for production
-  PROMETHEUS_METRICS_CACHE_ENABLED: "true"
   # Prometheus cache TTL - how long metrics are cached before expiring (default: "30s")
   PROMETHEUS_METRICS_CACHE_TTL: "30s"
   # Maximum number of Prometheus cache entries (0 = unlimited, default: "0")

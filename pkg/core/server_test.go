@@ -491,13 +491,10 @@ func TestServer_Calculate(t *testing.T) {
 			AccCount:     1,
 			MaxBatchSize: 16,
 			AtTokens:     200,
-			DecodeParms: config.DecodeParms{
+			ServiceParms: config.ServiceParms{
 				Alpha: 5.0,
-				Beta:  2.0,
-			},
-			PrefillParms: config.PrefillParms{
-				Gamma: 10.0,
-				Delta: 1.5,
+				Beta:  0.2,
+				Gamma: 0.015,
 			},
 		}
 		model.AddPerfDataFromSpec(perfData)
@@ -554,7 +551,7 @@ func TestServer_Calculate(t *testing.T) {
 				Class: "default",
 				CurrentAlloc: config.AllocationData{
 					Load: config.ServerLoadSpec{
-						ArrivalRate:  60,
+						ArrivalRate:  6,
 						AvgInTokens:  100,
 						AvgOutTokens: 200,
 					},

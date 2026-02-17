@@ -91,20 +91,15 @@ func CreateAllocation(serverName string, gName string) *Allocation {
 		MaxBatchSize: N,
 		MaxQueueSize: maxQueue,
 		ServiceParms: &analyzer.ServiceParms{
-			Prefill: &analyzer.PrefillParms{
-				Gamma: perf.PrefillParms.Gamma,
-				Delta: perf.PrefillParms.Delta,
-			},
-			Decode: &analyzer.DecodeParms{
-				Alpha: perf.DecodeParms.Alpha,
-				Beta:  perf.DecodeParms.Beta,
-			},
+			Alpha: perf.ServiceParms.Alpha,
+			Beta:  perf.ServiceParms.Beta,
+			Gamma: perf.ServiceParms.Gamma,
 		},
 	}
 
 	requestData := &analyzer.RequestSize{
-		AvgInputTokens:  load.AvgInTokens,
-		AvgOutputTokens: K,
+		AvgInputTokens:  float32(load.AvgInTokens),
+		AvgOutputTokens: float32(K),
 	}
 
 	queueAnalyzer, err := analyzer.NewQueueAnalyzer(qConfig, requestData)
@@ -112,9 +107,6 @@ func CreateAllocation(serverName string, gName string) *Allocation {
 		fmt.Println(err)
 		return nil
 	}
-
-	// TODO: do we need this?
-	// waitTimeLimit := target.TTFT / config.SLOMargin // distribution of waiting time assumed exponential
 
 	targetPerf := &analyzer.TargetPerf{
 		TargetTTFT: target.TTFT,
@@ -275,9 +267,9 @@ func zeroLoadAllocation(server *Server, model *Model, acc *Accelerator, perf *co
 	cost := acc.Cost() * float32(totalNumInstances)
 
 	//TODO: maxArrvRatePerReplica seems to be meaningless
-	decodeTime := perf.DecodeParms.Alpha + perf.DecodeParms.Beta
-	maxDecodeTime := perf.DecodeParms.Alpha + perf.DecodeParms.Beta*float32(maxBatchSize)
-	prefillTime := perf.PrefillParms.Gamma + perf.PrefillParms.Delta
+	decodeTime := perf.ServiceParms.Alpha + perf.ServiceParms.Beta
+	maxDecodeTime := perf.ServiceParms.Alpha + perf.ServiceParms.Beta*float32(maxBatchSize)
+	prefillTime := perf.ServiceParms.Alpha + perf.ServiceParms.Beta
 	maxServTime := prefillTime + maxDecodeTime
 	maxArrvRatePerReplica := float32(maxBatchSize) / maxServTime
 

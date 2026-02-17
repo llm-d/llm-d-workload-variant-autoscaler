@@ -51,13 +51,10 @@ func setupTestSystemForGreedy() {
 		AccCount:     1,
 		MaxBatchSize: 16,
 		AtTokens:     100,
-		DecodeParms: config.DecodeParms{
+		ServiceParms: config.ServiceParms{
 			Alpha: 10.0,
-			Beta:  2.0,
-		},
-		PrefillParms: config.PrefillParms{
-			Gamma: 5.0,
-			Delta: 0.1,
+			Beta:  0.2,
+			Gamma: 0.01,
 		},
 	})
 	model1.AddPerfDataFromSpec(&config.ModelAcceleratorPerfData{
@@ -66,13 +63,10 @@ func setupTestSystemForGreedy() {
 		AccCount:     1,
 		MaxBatchSize: 32,
 		AtTokens:     100,
-		DecodeParms: config.DecodeParms{
+		ServiceParms: config.ServiceParms{
 			Alpha: 8.0,
-			Beta:  1.5,
-		},
-		PrefillParms: config.PrefillParms{
-			Gamma: 3.0,
-			Delta: 0.08,
+			Beta:  0.15,
+			Gamma: 0.008,
 		},
 	})
 
@@ -83,13 +77,10 @@ func setupTestSystemForGreedy() {
 		AccCount:     2,
 		MaxBatchSize: 8,
 		AtTokens:     150,
-		DecodeParms: config.DecodeParms{
+		ServiceParms: config.ServiceParms{
 			Alpha: 15.0,
-			Beta:  3.0,
-		},
-		PrefillParms: config.PrefillParms{
-			Gamma: 8.0,
-			Delta: 0.15,
+			Beta:  0.3,
+			Gamma: 0.01,
 		},
 	})
 	model2.AddPerfDataFromSpec(&config.ModelAcceleratorPerfData{
@@ -98,13 +89,10 @@ func setupTestSystemForGreedy() {
 		AccCount:     1,
 		MaxBatchSize: 16,
 		AtTokens:     150,
-		DecodeParms: config.DecodeParms{
+		ServiceParms: config.ServiceParms{
 			Alpha: 12.0,
-			Beta:  2.5,
-		},
-		PrefillParms: config.PrefillParms{
-			Gamma: 6.0,
-			Delta: 0.12,
+			Beta:  0.25,
+			Gamma: 0.012,
 		},
 	})
 
@@ -115,13 +103,13 @@ func setupTestSystemForGreedy() {
 		highPriorityClass.AddModelTarget(&config.ModelTarget{
 			Model:    "llama-7b",
 			SLO_ITL:  400,
-			SLO_TTFT: 20,
+			SLO_TTFT: 2000,
 			SLO_TPS:  15,
 		})
 		highPriorityClass.AddModelTarget(&config.ModelTarget{
 			Model:    "llama-13b",
 			SLO_ITL:  500,
-			SLO_TTFT: 25,
+			SLO_TTFT: 2500,
 			SLO_TPS:  12,
 		})
 	}
@@ -132,13 +120,13 @@ func setupTestSystemForGreedy() {
 		mediumPriorityClass.AddModelTarget(&config.ModelTarget{
 			Model:    "llama-7b",
 			SLO_ITL:  450,
-			SLO_TTFT: 22,
+			SLO_TTFT: 2200,
 			SLO_TPS:  13,
 		})
 		mediumPriorityClass.AddModelTarget(&config.ModelTarget{
 			Model:    "llama-13b",
 			SLO_ITL:  550,
-			SLO_TTFT: 28,
+			SLO_TTFT: 2800,
 			SLO_TPS:  10,
 		})
 	}
@@ -149,7 +137,7 @@ func setupTestSystemForGreedy() {
 		lowPriorityClass.AddModelTarget(&config.ModelTarget{
 			Model:    "llama-7b",
 			SLO_ITL:  500,
-			SLO_TTFT: 25,
+			SLO_TTFT: 2500,
 			SLO_TPS:  10,
 		})
 	}

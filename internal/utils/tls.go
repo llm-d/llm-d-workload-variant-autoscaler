@@ -9,51 +9,57 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	interfaces "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/config"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/logging"
 )
 
-// CreateTLSConfig creates a TLS configuration from PrometheusConfig.
+// CreateTLSConfig creates a TLS configuration from getter-based Prometheus config.
 // TLS is always enabled for HTTPS-only support. The configuration supports:
 // - Server certificate validation via CA certificate
 // - Mutual TLS authentication via client certificates
 // - Insecure certificate verification (development/testing only)
-func CreateTLSConfig(promConfig *interfaces.PrometheusConfig) (*tls.Config, error) {
-	if promConfig == nil {
+func CreateTLSConfig(cfg *config.Config) (*tls.Config, error) {
+	if cfg == nil {
 		return nil, nil
 	}
 
+	insecureSkipVerify := cfg.PrometheusInsecureSkipVerify()
+	serverName := cfg.PrometheusServerName()
+	caCertPath := cfg.PrometheusCACertPath()
+	clientCertPath := cfg.PrometheusClientCertPath()
+	clientKeyPath := cfg.PrometheusClientKeyPath()
+
 	config := &tls.Config{
-		InsecureSkipVerify: promConfig.InsecureSkipVerify,
-		ServerName:         promConfig.ServerName,
+		InsecureSkipVerify: insecureSkipVerify,
+		ServerName:         serverName,
 		MinVersion:         tls.VersionTLS12, // Enforce minimum TLS version - https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/security_and_compliance/tls-security-profiles#:~:text=requires%20a%20minimum-,TLS%20version%20of%201.2,-.
 	}
 
 	// Load CA certificate if provided
-	if promConfig.CACertPath != "" {
-		caCert, err := os.ReadFile(promConfig.CACertPath)
+	if caCertPath != "" {
+		caCert, err := os.ReadFile(caCertPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read CA certificate from %s: %w", promConfig.CACertPath, err)
+			return nil, fmt.Errorf("failed to read CA certificate from %s: %w", caCertPath, err)
 		}
 
 		caCertPool := x509.NewCertPool()
 		if !caCertPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA certificate from %s", promConfig.CACertPath)
+			return nil, fmt.Errorf("failed to parse CA certificate from %s", caCertPath)
 		}
 		config.RootCAs = caCertPool
-		ctrl.Log.V(logging.VERBOSE).Info("CA certificate loaded successfully", "path", promConfig.CACertPath)
+		ctrl.Log.V(logging.VERBOSE).Info("CA certificate loaded successfully", "path", caCertPath)
 	}
 
 	// Load client certificate and key if provided
-	if promConfig.ClientCertPath != "" && promConfig.ClientKeyPath != "" {
-		cert, err := tls.LoadX509KeyPair(promConfig.ClientCertPath, promConfig.ClientKeyPath)
+	if clientCertPath != "" && clientKeyPath != "" {
+		cert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load client certificate from %s and key from %s: %w",
-				promConfig.ClientCertPath, promConfig.ClientKeyPath, err)
+				clientCertPath, clientKeyPath, err)
 		}
 		config.Certificates = []tls.Certificate{cert}
 		ctrl.Log.V(logging.VERBOSE).Info("Client certificate loaded successfully",
-			"cert_path", promConfig.ClientCertPath, "key_path", promConfig.ClientKeyPath)
+			"cert_path", clientCertPath, "key_path", clientKeyPath)
 	}
 
 	return config, nil
@@ -61,37 +67,46 @@ func CreateTLSConfig(promConfig *interfaces.PrometheusConfig) (*tls.Config, erro
 
 // ValidateTLSConfig validates TLS configuration.
 // Ensures HTTPS is used and certificate files exist when verification is enabled.
-// Note: This function assumes promConfig is not nil - nil checks should be performed at a higher level.
-func ValidateTLSConfig(promConfig *interfaces.PrometheusConfig) error {
+func ValidateTLSConfig(cfg *config.Config) error {
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
+	}
+
+	baseURL := cfg.PrometheusBaseURL()
+	insecureSkipVerify := cfg.PrometheusInsecureSkipVerify()
+	caCertPath := cfg.PrometheusCACertPath()
+	clientCertPath := cfg.PrometheusClientCertPath()
+	clientKeyPath := cfg.PrometheusClientKeyPath()
+
 	// Validate that the URL uses HTTPS (TLS is always required)
-	u, err := url.Parse(promConfig.BaseURL)
+	u, err := url.Parse(baseURL)
 	if err != nil || u.Scheme != "https" {
-		return fmt.Errorf("HTTPS is required - URL must use https:// scheme: %s", promConfig.BaseURL)
+		return fmt.Errorf("HTTPS is required - URL must use https:// scheme: %s", baseURL)
 	}
 
 	// If InsecureSkipVerify is true, we don't need to validate certificate files
 	// since we're intentionally skipping certificate verification
-	if promConfig.InsecureSkipVerify {
+	if insecureSkipVerify {
 		ctrl.Log.V(logging.VERBOSE).Info("TLS certificate verification is disabled - this is not recommended for production")
 		return nil
 	}
 
 	// Check if certificate files exist (only when not skipping verification)
-	if promConfig.CACertPath != "" {
-		if _, err := os.Stat(promConfig.CACertPath); os.IsNotExist(err) {
-			return fmt.Errorf("CA certificate file not found: %s", promConfig.CACertPath)
+	if caCertPath != "" {
+		if _, err := os.Stat(caCertPath); os.IsNotExist(err) {
+			return fmt.Errorf("CA certificate file not found: %s", caCertPath)
 		}
 	}
 
-	if promConfig.ClientCertPath != "" {
-		if _, err := os.Stat(promConfig.ClientCertPath); os.IsNotExist(err) {
-			return fmt.Errorf("client certificate file not found: %s", promConfig.ClientCertPath)
+	if clientCertPath != "" {
+		if _, err := os.Stat(clientCertPath); os.IsNotExist(err) {
+			return fmt.Errorf("client certificate file not found: %s", clientCertPath)
 		}
 	}
 
-	if promConfig.ClientKeyPath != "" {
-		if _, err := os.Stat(promConfig.ClientKeyPath); os.IsNotExist(err) {
-			return fmt.Errorf("client key file not found: %s", promConfig.ClientKeyPath)
+	if clientKeyPath != "" {
+		if _, err := os.Stat(clientKeyPath); os.IsNotExist(err) {
+			return fmt.Errorf("client key file not found: %s", clientKeyPath)
 		}
 	}
 
