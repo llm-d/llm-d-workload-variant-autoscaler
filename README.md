@@ -25,18 +25,7 @@ The Workload Variant Autoscaler (WVA) is a Kubernetes-based global autoscaler fo
 - kubectl
 
 ### Install with Helm (Recommended)
-
-```bash
-# Add the WVA Helm repository (when published)
-helm upgrade -i workload-variant-autoscaler ./charts/workload-variant-autoscaler \
-  --namespace workload-variant-autoscaler-system \
-  --set-file prometheus.caCert=/tmp/prometheus-ca.crt \
-  --set variantAutoscaling.accelerator=L40S \
-  --set variantAutoscaling.modelID=unsloth/Meta-Llama-3.1-8B \
-  --set vllmService.enabled=true \
-  --set vllmService.nodePort=30000
-  --create-namespace
-```
+Go to the **INSTALL (on OpenShift)** section [here](charts/workload-variant-autoscaler/README.md) for detailed steps.
 
 ### Try it Locally with Kind (No GPU Required!)
 
