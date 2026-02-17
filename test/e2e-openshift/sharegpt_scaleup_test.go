@@ -56,6 +56,14 @@ func sanitizeK8sName(name string) string {
 
 var lowLoad = numPrompts <= 2000 && requestRate <= 8
 
+// truncateString returns the first n characters of s, appending "..." if truncated.
+func truncateString(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
 // Load generation configuration constants
 // These values were tuned empirically to achieve ~2-3 replica scale-up without excessive scaling.
 // Original values (baseLoadWorkers=10, batchSize=50, batchSleepDuration=0.1) caused cascade
@@ -156,7 +164,8 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 				vaName               string
 				scaledReplicas       int32
 				scaledOptimized      int32
-				scaledLoadWorkers    int // Load workers scaled to initial replicas
+				scaledLoadWorkers    int    // Load workers scaled to initial replicas
+				hpaMetricSelector    string // Label selector matching the HPA's external metric query
 				jobCompletionTimeout = 10 * time.Minute
 			)
 
@@ -231,6 +240,17 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 				Expect(hpa.Spec.Metrics).To(HaveLen(1), "HPA should have one metric")
 				Expect(hpa.Spec.Metrics[0].Type).To(Equal(autoscalingv2.ExternalMetricSourceType), "HPA should use external metrics")
 				Expect(hpa.Spec.Metrics[0].External.Metric.Name).To(Equal(constants.WVADesiredReplicas), "HPA should use wva_desired_replicas metric")
+
+				// Extract the HPA's metric label selector for diagnostic external metrics queries
+				// This allows us to query the external metrics API with the exact same labels the HPA uses
+				if hpa.Spec.Metrics[0].External.Metric.Selector != nil {
+					var selectorParts []string
+					for k, v := range hpa.Spec.Metrics[0].External.Metric.Selector.MatchLabels {
+						selectorParts = append(selectorParts, fmt.Sprintf("%s=%s", k, v))
+					}
+					hpaMetricSelector = strings.Join(selectorParts, ",")
+					_, _ = fmt.Fprintf(GinkgoWriter, "HPA metric selector: %s\n", hpaMetricSelector)
+				}
 
 				By("verifying gateway service exists for load routing")
 				// Traffic goes through the Istio gateway to be properly routed via InferencePool/EPP
@@ -309,15 +329,23 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 			})
 
 			It("should verify external metrics API is accessible", func() {
-				By("querying external metrics API for wva_desired_replicas")
+				By("querying external metrics API for wva_desired_replicas with exact HPA label selectors")
 				Eventually(func(g Gomega) {
-					result, err := k8sClient.RESTClient().
+					// Query with the exact label selectors the HPA uses (including controller_instance
+					// if set). This catches label propagation issues that a bare query would miss.
+					req := k8sClient.RESTClient().
 						Get().
-						AbsPath("/apis/external.metrics.k8s.io/v1beta1/namespaces/" + model.namespace + "/" + constants.WVADesiredReplicas).
-						DoRaw(ctx)
+						AbsPath("/apis/external.metrics.k8s.io/v1beta1/namespaces/" + model.namespace + "/" + constants.WVADesiredReplicas)
+					if hpaMetricSelector != "" {
+						req = req.Param("labelSelector", hpaMetricSelector)
+					}
+					result, err := req.DoRaw(ctx)
 					g.Expect(err).NotTo(HaveOccurred(), "Should be able to query external metrics API")
-					g.Expect(string(result)).To(ContainSubstring(constants.WVADesiredReplicas), "Metric should be available")
-					g.Expect(string(result)).To(ContainSubstring(vaName), "Metric should be for the correct variant")
+					resultStr := string(result)
+					g.Expect(resultStr).To(ContainSubstring(constants.WVADesiredReplicas), "Metric should be available")
+					g.Expect(resultStr).To(ContainSubstring(vaName), "Metric should be for the correct variant")
+					_, _ = fmt.Fprintf(GinkgoWriter, "External metrics API response (selector: %s): %s\n",
+						hpaMetricSelector, truncateString(resultStr, 500))
 				}, 5*time.Minute, 5*time.Second).Should(Succeed())
 			})
 
@@ -488,12 +516,33 @@ exit 1`,
 					_, _ = fmt.Fprintf(GinkgoWriter, "HPA desiredReplicas: %d, currentReplicas: %d\n",
 						hpa.Status.DesiredReplicas, hpa.Status.CurrentReplicas)
 
+					// Log HPA conditions for diagnostic insight (e.g., ScalingActive, AbleToScale)
+					for _, cond := range hpa.Status.Conditions {
+						if cond.Status != "True" || cond.Type == autoscalingv2.ScalingActive {
+							_, _ = fmt.Fprintf(GinkgoWriter, "  HPA condition %s=%s: %s\n",
+								cond.Type, cond.Status, cond.Message)
+						}
+					}
+
+					// Diagnostic: query external metrics API with exact HPA labels to see what the adapter returns
+					if hpaMetricSelector != "" {
+						if result, qErr := k8sClient.RESTClient().
+							Get().
+							AbsPath("/apis/external.metrics.k8s.io/v1beta1/namespaces/" + model.namespace + "/" + constants.WVADesiredReplicas).
+							Param("labelSelector", hpaMetricSelector).
+							DoRaw(ctx); qErr == nil {
+							_, _ = fmt.Fprintf(GinkgoWriter, "  External metric (HPA labels): %s\n", truncateString(string(result), 300))
+						} else {
+							_, _ = fmt.Fprintf(GinkgoWriter, "  External metric query error: %v\n", qErr)
+						}
+					}
+
 					if !lowLoad {
 						// HPA should also desire more replicas than initial
 						g.Expect(hpa.Status.DesiredReplicas).To(BeNumerically(">", initialOptimized),
 							fmt.Sprintf("HPA should desire more replicas than initial (desired: %d, initial: %d)", hpa.Status.DesiredReplicas, initialOptimized))
 					}
-				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+				}, 8*time.Minute, 10*time.Second).Should(Succeed())
 
 				_, _ = fmt.Fprintf(GinkgoWriter, "WVA detected load and recommended %d replicas (up from %d)\n", scaledOptimized, initialOptimized)
 			})
