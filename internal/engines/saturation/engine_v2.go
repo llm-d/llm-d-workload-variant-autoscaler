@@ -103,7 +103,7 @@ func buildVariantAnalysesFromDecisions(decisions []interfaces.VariantDecision, m
 // applyEnforcedTargetsToDecisions updates the optimizer's decisions with
 // enforced targets after the enforcer has run. This bridges the enforcer's
 // map[string]int output back into []VariantDecision.
-func applyEnforcedTargetsToDecisions(decisions []interfaces.VariantDecision, enforcedTargets map[string]int, modelID, namespace string) []interfaces.VariantDecision {
+func applyEnforcedTargetsToDecisions(decisions []interfaces.VariantDecision, enforcedTargets map[string]int, modelID, namespace, optimizerName string) []interfaces.VariantDecision {
 	for i := range decisions {
 		d := &decisions[i]
 		if d.ModelID != modelID || d.Namespace != namespace {
@@ -120,7 +120,7 @@ func applyEnforcedTargetsToDecisions(decisions []interfaces.VariantDecision, enf
 			default:
 				d.Action = interfaces.ActionNoChange
 			}
-			d.Reason = fmt.Sprintf("V2 %s (optimizer: %s, enforced)", d.Action, "cost-aware")
+			d.Reason = fmt.Sprintf("V2 %s (optimizer: %s, enforced)", d.Action, optimizerName)
 		}
 	}
 	return decisions

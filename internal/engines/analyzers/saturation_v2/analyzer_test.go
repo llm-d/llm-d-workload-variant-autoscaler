@@ -23,8 +23,8 @@ var _ = Describe("SaturationAnalyzer", func() {
 	})
 
 	Describe("Name", func() {
-		It("should return 'saturation'", func() {
-			Expect(analyzer.Name()).To(Equal("saturation"))
+		It("should return 'saturation-token-based'", func() {
+			Expect(analyzer.Name()).To(Equal("saturation-token-based"))
 		})
 	})
 

@@ -111,6 +111,18 @@ func NewEngine(client client.Client, scheme *runtime.Scheme, recorder record.Eve
 
 	capacityStore := saturation_v2.NewCapacityKnowledgeStore()
 
+	// Select optimizer at init time based on global config.
+	// CostAwareOptimizer (unlimited mode) is the default.
+	// When limited mode is enabled, a GPU-constrained optimizer will be used
+	// (GreedyBySaturationOptimizer, added in a follow-up).
+	var scalingOptimizer pipeline.ScalingOptimizer
+	if cfg.LimitedModeEnabled() {
+		// TODO: use GreedyBySaturationOptimizer when available
+		scalingOptimizer = pipeline.NewCostAwareOptimizer()
+	} else {
+		scalingOptimizer = pipeline.NewCostAwareOptimizer()
+	}
+
 	engine := Engine{
 		client:                  client,
 		scheme:                  scheme,
@@ -122,7 +134,7 @@ func NewEngine(client client.Client, scheme *runtime.Scheme, recorder record.Eve
 		metricsRegistry:         metricsRegistry,
 		saturationV2Analyzer:    saturation_v2.NewSaturationAnalyzer(capacityStore),
 		capacityStore:           capacityStore,
-		optimizer:               pipeline.NewCostAwareOptimizer(),
+		optimizer:               scalingOptimizer,
 	}
 
 	engine.executor = executor.NewPollingExecutor(executor.PollingConfig{
@@ -133,7 +145,11 @@ func NewEngine(client client.Client, scheme *runtime.Scheme, recorder record.Eve
 		RetryBackoff: 100 * time.Millisecond,
 	})
 
-	// Register saturation-specific queries in the metrics registry
+	// Register saturation queries in the metrics registry.
+	// Both V1 (percentage-based) and V2 (token-based) analyzers share the same
+	// base queries (kv_cache_usage, queue_length). V2-specific queries
+	// (cache_config_info, avg_output_tokens, etc.) are registered but unused
+	// when V1 is active — they're just query templates with no runtime cost.
 	registration.RegisterSaturationQueries(metricsRegistry)
 
 	// Register scale-to-zero queries in the metrics registry
@@ -210,7 +226,9 @@ func (e *Engine) optimize(ctx context.Context) error {
 	// Keyed by VariantAutoscaling Namespace/Name
 	currentAllocations := make(map[string]*interfaces.Allocation)
 
-	// Determine whether to use V2 optimizer path from global config
+	// Determine whether to use V2 token-based optimizer path from global config.
+	// Config value "saturation" selects the V2 token-based analyzer;
+	// empty/other values use the V1 percentage-based analyzer.
 	globalSatCfgMap := e.Config.SaturationConfig()
 	useV2 := false
 	if cfg, ok := globalSatCfgMap["default"]; ok {
@@ -220,6 +238,12 @@ func (e *Engine) optimize(ctx context.Context) error {
 
 	var allDecisions []interfaces.VariantDecision
 
+	// V1 and V2 have separate optimize paths because they use fundamentally
+	// different analysis types and target-building flows:
+	//   - V1: saturation.Analyzer → ModelSaturationAnalysis → CalculateSaturationTargets → Enforcer → Limiter
+	//   - V2: saturation_v2.Analyzer → AnalyzerResult → Optimizer.Optimize → Enforcer bridge
+	// V1 will be deprecated once V2 is fully validated, at which point the
+	// V1 path and the saturation.Analyzer can be removed.
 	if useV2 {
 		allDecisions = e.optimizeV2(ctx, modelGroups, currentAllocations)
 	} else {
@@ -249,7 +273,7 @@ func (e *Engine) optimize(ctx context.Context) error {
 	return nil
 }
 
-// optimizeV1 runs the V1 percentage-based saturation analysis path.
+// optimizeV1 runs the V1 percentage-based saturation analysis path (saturation-percentage-based).
 // Processes each model independently: analyze → enforce → convert → limiter.
 func (e *Engine) optimizeV1(
 	ctx context.Context,
@@ -367,7 +391,7 @@ func (e *Engine) optimizeV1(
 	return allDecisions
 }
 
-// optimizeV2 runs the V2 token-based optimizer path.
+// optimizeV2 runs the V2 token-based optimizer path (saturation-token-based).
 // Collects AnalyzerResults for all models, calls the optimizer once, then applies enforcer per-model.
 func (e *Engine) optimizeV2(
 	ctx context.Context,
@@ -454,7 +478,7 @@ func (e *Engine) optimizeV2(
 				"modelID", req.ModelID, "enforcedTargets", enforcedTargets)
 		}
 
-		allDecisions = applyEnforcedTargetsToDecisions(allDecisions, enforcedTargets, req.ModelID, req.Namespace)
+		allDecisions = applyEnforcedTargetsToDecisions(allDecisions, enforcedTargets, req.ModelID, req.Namespace, e.optimizer.Name())
 	}
 
 	return allDecisions

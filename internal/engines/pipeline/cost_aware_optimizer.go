@@ -54,9 +54,9 @@ func (o *CostAwareOptimizer) Optimize(
 		targets := initTargets(req.VariantStates)
 
 		if req.Result.RequiredCapacity > 0 {
-			costAwareScaleUp(ctx, req.Result, vcMap, targets)
+			costAwareScaleUp(ctx, req.Result, targets)
 		} else if req.Result.SpareCapacity > 0 {
-			costAwareScaleDown(ctx, req.Result, vcMap, targets)
+			costAwareScaleDown(ctx, req.Result, targets)
 		}
 
 		decisions := buildDecisions(req, stateMap, vcMap, targets)
@@ -77,7 +77,6 @@ func (o *CostAwareOptimizer) Optimize(
 func costAwareScaleUp(
 	ctx context.Context,
 	result *interfaces.AnalyzerResult,
-	vcMap map[string]interfaces.VariantCapacity,
 	targets map[string]int,
 ) {
 	logger := ctrl.LoggerFrom(ctx)
@@ -112,7 +111,6 @@ func costAwareScaleUp(
 func costAwareScaleDown(
 	ctx context.Context,
 	result *interfaces.AnalyzerResult,
-	vcMap map[string]interfaces.VariantCapacity,
 	targets map[string]int,
 ) {
 	logger := ctrl.LoggerFrom(ctx)

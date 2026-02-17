@@ -72,7 +72,7 @@ var _ = Describe("V2 Engine Integration", func() {
 				"v2": 0,
 			}
 
-			result := applyEnforcedTargetsToDecisions(decisions, enforced, "model-1", "ns-1")
+			result := applyEnforcedTargetsToDecisions(decisions, enforced, "model-1", "ns-1", "cost-aware")
 
 			Expect(result[0].TargetReplicas).To(Equal(0))
 			Expect(result[0].Action).To(Equal(interfaces.ActionScaleDown))
@@ -88,7 +88,7 @@ var _ = Describe("V2 Engine Integration", func() {
 
 			enforced := map[string]int{"v1": 0}
 
-			result := applyEnforcedTargetsToDecisions(decisions, enforced, "model-1", "ns-1")
+			result := applyEnforcedTargetsToDecisions(decisions, enforced, "model-1", "ns-1", "cost-aware")
 
 			Expect(result[0].TargetReplicas).To(Equal(0))
 			Expect(result[1].TargetReplicas).To(Equal(2)) // unchanged
@@ -101,7 +101,7 @@ var _ = Describe("V2 Engine Integration", func() {
 
 			enforced := map[string]int{"v1": 3} // same as target
 
-			result := applyEnforcedTargetsToDecisions(decisions, enforced, "model-1", "ns-1")
+			result := applyEnforcedTargetsToDecisions(decisions, enforced, "model-1", "ns-1", "cost-aware")
 
 			Expect(result[0].TargetReplicas).To(Equal(3))
 			Expect(result[0].Action).To(Equal(interfaces.ActionScaleUp))
