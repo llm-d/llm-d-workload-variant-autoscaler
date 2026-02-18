@@ -229,6 +229,8 @@ deploy_prometheus_stack() {
     rm -f /tmp/prometheus-tls.{key,crt}
     
     # Install kube-prometheus-stack with TLS enabled
+    # Disable Grafana and Alertmanager — WVA only needs Prometheus for metrics collection.
+    # Use a 10m timeout — 5m is insufficient on busy clusters (e.g. CKS with preemption).
     log_info "Installing kube-prometheus-stack with TLS configuration"
     helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
         -n $MONITORING_NAMESPACE \
@@ -240,7 +242,9 @@ deploy_prometheus_stack() {
         --set prometheus.prometheusSpec.web.tlsConfig.cert.secret.key=tls.crt \
         --set prometheus.prometheusSpec.web.tlsConfig.keySecret.name=$PROMETHEUS_SECRET_NAME \
         --set prometheus.prometheusSpec.web.tlsConfig.keySecret.key=tls.key \
-        --timeout=5m \
+        --set grafana.enabled=false \
+        --set alertmanager.enabled=false \
+        --timeout=10m \
         --wait
     
     log_success "kube-prometheus-stack deployed with TLS"
