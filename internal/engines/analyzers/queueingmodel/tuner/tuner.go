@@ -200,8 +200,8 @@ func (t *Tuner) makeObservationFunc() func(x *mat.VecDense) *mat.VecDense {
 			},
 		}
 		requestData := &analyzer.RequestSize{
-			AvgInputTokens:  float32(t.env.AvgInputToks),
-			AvgOutputTokens: float32(t.env.AvgOutputToks),
+			AvgInputTokens:  t.env.AvgInputToks,
+			AvgOutputTokens: t.env.AvgOutputToks,
 		}
 
 		qa, err := analyzer.NewQueueAnalyzer(qConfig, requestData)
