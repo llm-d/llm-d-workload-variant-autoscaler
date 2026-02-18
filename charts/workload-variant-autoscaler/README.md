@@ -255,34 +255,7 @@ helm install workload-variant-autoscaler ./workload-variant-autoscaler \
 
 ### Multi-Controller Isolation
 
-When running multiple WVA controllers in the same cluster (e.g., for parallel e2e tests or multi-tenant environments), use the `controllerInstance` configuration to prevent metrics conflicts between controllers.
-
-#### How It Works
-
-When `wva.controllerInstance` is set:
-1. The controller adds a `controller_instance` label to all emitted metrics
-2. The HPA selector includes `controller_instance` to filter metrics from the specific controller
-3. Each controller only sees metrics from its own instance, preventing conflicts
-
-#### Configuration
-
-**Via Helm:**
-```bash
-helm install my-wva ./workload-variant-autoscaler \
-  -n my-namespace \
-  --set wva.controllerInstance="my-unique-instance-id"
-```
-
-**Via Environment Variable (install.sh):**
-```bash
-CONTROLLER_INSTANCE="my-unique-instance-id" ./deploy/install.sh
-```
-
-**Via values.yaml:**
-```yaml
-wva:
-  controllerInstance: "my-unique-instance-id"
-```
+When running multiple WVA controllers in the same cluster (e.g., for parallel e2e tests or multi-tenant environments), use the `controllerInstance` configuration to prevent metrics conflicts between controllers. See [Multi-Controller Isolation](../../docs/user-guide/multi-controller-isolation.md) for details configuration.
 
 #### E2E Testing Example
 
