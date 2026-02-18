@@ -136,6 +136,59 @@ log_error() {
     exit 1
 }
 
+# APIService guard: background loop that continuously ensures the
+# v1beta1.external.metrics.k8s.io APIService points to prometheus-adapter.
+# On clusters with KEDA, the operator continuously reconciles the APIService
+# back to keda-metrics-apiserver, breaking HPA scaling for WVA.
+# This guard re-patches it every 10 seconds without modifying KEDA itself.
+APISERVICE_GUARD_PID=""
+
+start_apiservice_guard() {
+    local monitoring_ns="$1"
+    log_info "Starting APIService guard (background re-patch loop every 10s)"
+    (
+        while true; do
+            sleep 10
+            current_svc=$(kubectl get apiservice v1beta1.external.metrics.k8s.io \
+                -o jsonpath='{.spec.service.name}' 2>/dev/null || echo "")
+            current_ns=$(kubectl get apiservice v1beta1.external.metrics.k8s.io \
+                -o jsonpath='{.spec.service.namespace}' 2>/dev/null || echo "")
+            if [ "$current_svc" != "prometheus-adapter" ] || [ "$current_ns" != "$monitoring_ns" ]; then
+                echo "[apiservice-guard] KEDA reclaimed APIService (now: $current_svc/$current_ns), re-patching to prometheus-adapter/$monitoring_ns"
+                kubectl patch apiservice v1beta1.external.metrics.k8s.io --type=merge -p "{
+                    \"spec\": {
+                        \"insecureSkipTLSVerify\": true,
+                        \"service\": {
+                            \"name\": \"prometheus-adapter\",
+                            \"namespace\": \"$monitoring_ns\"
+                        }
+                    }
+                }" 2>/dev/null || true
+            fi
+        done
+    ) &
+    APISERVICE_GUARD_PID=$!
+    echo "$APISERVICE_GUARD_PID" > /tmp/apiservice-guard.pid
+    log_success "APIService guard started (PID: $APISERVICE_GUARD_PID)"
+}
+
+stop_apiservice_guard() {
+    if [ -n "$APISERVICE_GUARD_PID" ] && kill -0 "$APISERVICE_GUARD_PID" 2>/dev/null; then
+        log_info "Stopping APIService guard (PID: $APISERVICE_GUARD_PID)"
+        kill "$APISERVICE_GUARD_PID" 2>/dev/null || true
+        wait "$APISERVICE_GUARD_PID" 2>/dev/null || true
+    elif [ -f /tmp/apiservice-guard.pid ]; then
+        local pid
+        pid=$(cat /tmp/apiservice-guard.pid)
+        if kill -0 "$pid" 2>/dev/null; then
+            log_info "Stopping APIService guard (PID: $pid from pidfile)"
+            kill "$pid" 2>/dev/null || true
+        fi
+    fi
+    rm -f /tmp/apiservice-guard.pid
+    APISERVICE_GUARD_PID=""
+}
+
 print_help() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -1019,6 +1072,12 @@ deploy_prometheus_adapter() {
             }" && log_success "APIService patched to use Prometheus Adapter" \
                || log_warning "Failed to patch external.metrics.k8s.io APIService — HPA may not work"
         fi
+
+        # Start background guard to prevent KEDA from reclaiming the APIService.
+        # KEDA's operator continuously reconciles the APIService back to its own
+        # metrics server within ~2 minutes of any patch. The guard re-patches it
+        # every 10 seconds without modifying KEDA itself.
+        start_apiservice_guard "$MONITORING_NAMESPACE"
     else
         log_warning "external.metrics.k8s.io APIService not found — skipping patch"
     fi
@@ -1182,6 +1241,10 @@ print_summary() {
 # Undeployment functions
 undeploy_prometheus_adapter() {
     log_info "Uninstalling Prometheus Adapter..."
+
+    # Stop the APIService guard if running
+    stop_apiservice_guard
+
     helm uninstall prometheus-adapter -n $MONITORING_NAMESPACE 2>/dev/null || \
         log_warning "Prometheus Adapter not found or already uninstalled"
 
@@ -1256,6 +1319,9 @@ cleanup() {
     log_info "Starting undeployment process..."
     log_info "======================================"
     echo ""
+
+    # Stop the APIService guard if running (safety net)
+    stop_apiservice_guard
 
     # Undeploy environment-specific components (Prometheus, etc.)
     if [ "$DEPLOY_PROMETHEUS" = "true" ]; then

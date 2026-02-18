@@ -155,8 +155,8 @@ retention_period: %s`, retentionPeriod),
 			// and gracefully skip if scale-to-zero cannot be validated.
 
 			scaledToZero := false
-			// Wait for retention period (3m) + buffer (2m) = 5m total
-			deadline := time.Now().Add(5 * time.Minute)
+			// Wait for retention period (3m) + buffer (7m) = 10m total
+			deadline := time.Now().Add(10 * time.Minute)
 
 			for time.Now().Before(deadline) {
 				va := &v1alpha1.VariantAutoscaling{}

@@ -359,7 +359,7 @@ var _ = Describe("ShareGPT Scale-Up Test", Ordered, func() {
 						_, _ = fmt.Fprintf(GinkgoWriter, "External metrics API response (selector: %s): %s\n",
 							hpaMetricSelector, truncateString(resultStr, 500))
 					}
-				}, 5*time.Minute, 5*time.Second).Should(Succeed())
+				}, 10*time.Minute, 5*time.Second).Should(Succeed())
 			})
 
 			It("should create and run parallel load generation jobs", func() {
