@@ -138,12 +138,12 @@ func TestClientOnlyNoVA(t *testing.T) {
 // is applied to VA resources in client-only mode.
 func TestClientOnlyControllerInstance(t *testing.T) {
 	output := helmTemplate(t, "wva-model-c", map[string]string{
-		"controller.enabled":    "false",
-		"va.enabled":            "true",
-		"hpa.enabled":           "true",
+		"controller.enabled":     "false",
+		"va.enabled":             "true",
+		"hpa.enabled":            "true",
 		"wva.controllerInstance": "my-team",
-		"llmd.namespace":        "team-c",
-		"llmd.modelName":        "my-model",
+		"llmd.namespace":         "team-c",
+		"llmd.modelName":         "my-model",
 	})
 
 	if !strings.Contains(output, "kind: VariantAutoscaling") {
