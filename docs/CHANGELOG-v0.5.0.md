@@ -135,6 +135,68 @@ query := fmt.Sprintf(`vllm_kv_cache_usage{namespace="%s"}`, escapedNamespace)
 **Documentation:**
 - [Prometheus Integration - PromQL Injection Prevention](integrations/prometheus.md#promql-injection-prevention)
 
+### 4. Scale-to-Zero Implementation
+
+**New Feature:**
+WVA now supports automatically scaling inference model deployments to zero replicas when they are not receiving traffic, significantly reducing infrastructure costs for idle models.
+
+**Key Capabilities:**
+
+1. **Request Monitoring**: Tracks request activity via Prometheus metrics
+2. **Configurable Retention**: Per-model or global retention period before scaling to zero
+3. **Flexible Configuration**: Environment variable, global defaults, or per-model ConfigMap settings
+4. **Automatic Recovery**: Deployments scale back up when new requests arrive
+
+**Configuration Methods:**
+
+1. **Global Environment Variable (Simple):**
+   ```yaml
+   env:
+   - name: WVA_SCALE_TO_ZERO
+     value: "true"
+   ```
+
+2. **Per-Model ConfigMap (Advanced):**
+   ```yaml
+   apiVersion: v1
+   kind: ConfigMap
+   metadata:
+     name: model-scale-to-zero-config
+   data:
+     default: |
+       enable_scale_to_zero: true
+       retention_period: "15m"
+     
+     llama-8b-override: |
+       model_id: meta/llama-3.1-8b
+       retention_period: "5m"
+   ```
+
+**Configuration Priority:**
+1. Per-model configuration (highest)
+2. Global ConfigMap defaults
+3. WVA_SCALE_TO_ZERO environment variable
+4. System default (disabled)
+
+**Integration Requirements:**
+
+- **HPA**: Requires Kubernetes 1.31+ with `HPAScaleToZero` feature gate (alpha)
+- **KEDA**: Natively supported (recommended approach)
+
+**Benefits:**
+- ✅ Eliminates compute costs for idle models
+- ✅ Automatic management without manual intervention
+- ✅ Per-model customization with retention periods
+- ✅ Graceful handling of cold start scenarios
+
+**Documentation:**
+- [Scale-to-Zero User Guide](user-guide/scale-to-zero.md)
+- [HPA Integration - Scale to Zero](integrations/hpa-integration.md#feature-scale-to-zero)
+- [KEDA Integration](integrations/keda-integration.md)
+
+**Sample Configuration:**
+- [model-scale-to-zero-config.yaml](../config/samples/model-scale-to-zero-config.yaml)
+
 ## Minor Improvements
 
 ### Helper Functions
@@ -250,6 +312,7 @@ E2E tests updated:
 ---
 
 For detailed implementation, see:
+- [Scale-to-Zero User Guide](user-guide/scale-to-zero.md)
 - [Saturation Analyzer Documentation](saturation-analyzer.md)
 - [Prometheus Integration](integrations/prometheus.md)
 - [Configuration Guide](user-guide/configuration.md)
