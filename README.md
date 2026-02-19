@@ -25,25 +25,13 @@ The Workload Variant Autoscaler (WVA) is a Kubernetes-based global autoscaler fo
 - kubectl
 
 ### Install with Helm (Recommended)
-Go to the **INSTALL (on OpenShift)** section [here](charts/workload-variant-autoscaler/README.md) for detailed steps.
+See the [Helm Installation](docs/user-guide/installation.md#option-1-helm-installation-recommended-on-openshift) for detailed instructions.
 
 ### Try it Locally with Kind (No GPU Required!)
-
-```bash
-# Deploy WVA with llm-d infrastructure on a local Kind cluster
-make deploy-wva-emulated-on-kind CREATE_CLUSTER=true DEPLOY_LLM_D=true
-
-# This creates a Kind cluster with emulated GPUs and deploys:
-# - WVA controller
-# - llm-d infrastructure (simulation mode)
-# - Prometheus and monitoring stack
-# - vLLM emulator for testing
-```
-
 **Works on Mac (Apple Silicon/Intel) and Windows** - no physical GPUs needed!
 Perfect for development and testing with GPU emulation.
 
-See the [Installation Guide](docs/user-guide/installation.md) for detailed instructions.
+See the [Kind Emulator](docs/user-guide/installation.md#option-4-local-development-kind-emulator) for detailed instructions.
 
 ## Documentation
 
