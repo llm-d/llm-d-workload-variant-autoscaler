@@ -95,9 +95,9 @@ var _ = Describe("Scale-to-Zero Test", Ordered, func() {
 
 	Context("Scale-to-zero enabled - verify scaling behavior", Ordered, func() {
 		var (
-			initialReplicas            int32
-			vaName                     string
-			scaleToZeroMetricsWorking  bool
+			initialReplicas           int32
+			vaName                    string
+			scaleToZeroMetricsWorking bool
 		)
 
 		BeforeAll(func() {
