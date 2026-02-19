@@ -1249,7 +1249,7 @@ print_summary() {
     echo "   kubectl get variantautoscaling -n $LLMD_NS"
     echo ""
     echo "2. View detailed status with conditions:"
-    echo "   kubectl describe variantautoscaling $LLM_D_MODELSERVICE_NAME-decode -n $LLMD_NS"
+    echo "   kubectl describe variantautoscaling workload-variant-autoscaler-va -n $LLMD_NS"
     echo ""
     echo "3. View WVA logs:"
     echo "   kubectl logs -n $WVA_NS -l app.kubernetes.io/name=workload-variant-autoscaler -f"
@@ -1286,7 +1286,8 @@ print_summary() {
     echo ""
     echo "• Check if metrics are being scraped by Prometheus:"
     echo "  kubectl port-forward -n $MONITORING_NAMESPACE svc/${PROMETHEUS_SVC_NAME} ${PROMETHEUS_PORT}:${PROMETHEUS_PORT}"
-    echo "  # Then visit https://localhost:${PROMETHEUS_PORT} and query: vllm:num_requests_running"
+    echo "  # Then visit https://localhost:${PROMETHEUS_PORT}, and query: vllm:num_requests_running" or
+    echo "  # curl -k https://localhost:${PROMETHEUS_PORT}/api/v1/query?query=wva_desired_replicas | jq ."
     echo ""
     echo "• Check Prometheus Adapter logs:"
     echo "  kubectl logs -n $MONITORING_NAMESPACE deployment/prometheus-adapter"
